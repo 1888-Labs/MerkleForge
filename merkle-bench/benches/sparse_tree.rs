@@ -164,8 +164,9 @@ fn bench_sparse_proof_verification_for<H: HashFunction>(c: &mut Criterion, algor
 
         group.bench_with_input(BenchmarkId::new(algorithm, size), &fixture, |b, fixture| {
             b.iter(|| {
-                black_box(SparseMerkleTree::<H>::verify(
+                black_box(SparseMerkleTree::<H>::verify_membership(
                     black_box(&fixture.root),
+                    black_box(fixture.key),
                     black_box(&fixture.value),
                     black_box(&fixture.proof),
                 ))

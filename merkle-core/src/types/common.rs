@@ -131,6 +131,11 @@ pub struct MerkleProof<D> {
     /// The index of the leaf this proof is for.
     pub leaf_index: LeafIndex,
     /// Total number of leaves in the tree at the time the proof was generated.
+    ///
+    /// The root does not commit to this value. Verifiers use it only to
+    /// derive the expected path length, so any value with the same padded
+    /// size verifies. If the leaf count matters to you, obtain it from a
+    /// trusted source and compare it with this field.
     pub leaf_count: usize,
     /// Sibling hashes from the leaf level up to (but not including) the root.
     pub path: Vec<ProofNode<D>>,

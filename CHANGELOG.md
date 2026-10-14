@@ -13,7 +13,81 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-No unreleased changes yet.
+Correctness and performance fixes for the tree variants. Roots and proofs for
+the shipped hash adapters are unchanged; a randomized snapshot of roots, node
+counts, heights, and serialized proofs for all three variants matched
+byte-for-byte before and after.
+
+### Fixed
+
+- `MerkleTree::insert` on `SparseMerkleTree` and `MerklePatriciaTrie` no
+  longer overwrites an existing leaf after a removal. It now returns the first
+  unoccupied index at or above the leaf count. `remove` and `generate_proof`
+  on an index with no leaf return `MerkleError::IndexOutOfBounds`.
+- `SparseMerkleTree` inserts and removals recompute only the stored nodes on
+  the changed key paths instead of rebuilding the whole tree, and proof
+  generation reads stored sibling commitments instead of scanning every leaf
+  per level. 4,000 sequential inserts drop from about 223 s to 0.2 s, and one
+  proof from 151 ms to 25 µs.
+- `MerklePatriciaTrie` inserts and removals update the trie in place and
+  re-hash only the changed path instead of rebuilding from every entry.
+  4,000 sequential inserts drop from about 5.9 s to 0.02 s.
+- Website Patricia and sparse examples now use the real API.
+
+### Added
+
+- `BinaryMerkleTree::from_leaves` builds a tree in one `O(n)` pass with the
+  same root and proofs as sequential inserts.
+- `SparseMerkleTree::verify_membership`, which checks that the proof is for
+  the expected key.
+- `HashFunction::hash_encoded_node` (provided method) for hashing
+  self-describing encodings such as RLP Patricia nodes. `Keccak256`
+  overrides it with plain Keccak-256.
+- `NodeEntry::commitment`.
+- `Clone`, `Debug`, `Serialize`, and `Deserialize` for `BinaryMerkleTree`,
+  `SparseMerkleTree`, and `MerklePatriciaTrie`. The serialized form stores
+  only leaves or entries plus the hash algorithm name; deserialization
+  rebuilds internal nodes and rejects data from a different hash algorithm.
+
+### Changed
+
+- **Breaking:** the default `HashFunction::hash_nodes` now hashes
+  `0x01 || left || right` instead of `left || right`, so custom adapters that
+  relied on the default are domain-separated. Their roots change; the shipped
+  adapters override `hash_nodes` and are unaffected.
+- **Breaking:** `MerklePatriciaTrie` selects plain Keccak-256 through
+  `hash_encoded_node` instead of matching the algorithm name
+  `"Keccak-256"`. A custom adapter that reported that name now needs to
+  override `hash_encoded_node` to keep Ethereum-compatible roots.
+- **Breaking:** removed the hidden `MptNode::__DigestMarker` variant.
+- `MerklePatriciaTrie::node_count` is no longer a `const fn`; `new`,
+  `is_empty`, and `leaf_count` now are.
+- `MerklePatriciaTrie` and its helpers no longer require
+  `H::Digest: From<[u8; 32]>`, and `merkle-variants` no longer depends on
+  `tiny-keccak`.
+
+### Deprecated
+
+- `SparseMerkleTree::verify`: it does not check which key a proof is for.
+  Use `verify_membership`.
+
+### Documentation
+
+- Added the official MerkleForge brand kit under `assets/brand/` (Forged block
+  mark, lockups, wordmark, app icons, social banners, favicons, and usage rules
+  in `BRAND.md`).
+- Gave the root README a centred brand header and every crate and tool README a
+  branded header. Published crate READMEs now use absolute links so images,
+  licenses, and benchmark links resolve on crates.io.
+- Added `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1) and linked it from the
+  README and `CONTRIBUTING.md`.
+- The website now uses the Forged block mark, brand wordmark styling, and the
+  brand favicon set and web manifest.
+- Removed the local `AGENTS.md` agent guidance file.
+- `MerkleProof::leaf_count` now documents that the root does not commit to
+  it, so verifiers must not trust it without an independent source.
+- `HashFunction` docs and the `merkle-core` README describe the required
+  `0x00` / `0x01` domain-separation convention.
 
 ---
 
@@ -271,9 +345,9 @@ pipeline.
 
 ---
 
-[Unreleased]: https://github.com/dicethedev/MerkleForge/compare/v0.4.1...HEAD
-[0.4.1]: https://github.com/dicethedev/MerkleForge/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/dicethedev/MerkleForge/compare/v0.2.0...v0.4.0
-[0.2.0]: https://github.com/dicethedev/MerkleForge/compare/v0.1.1...v0.2.0
-[0.1.1]: https://github.com/dicethedev/MerkleForge/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/dicethedev/MerkleForge/releases/tag/v0.1.0
+[Unreleased]: https://github.com/1888-Labs/MerkleForge/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/1888-Labs/MerkleForge/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/1888-Labs/MerkleForge/compare/v0.2.0...v0.4.0
+[0.2.0]: https://github.com/1888-Labs/MerkleForge/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/1888-Labs/MerkleForge/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/1888-Labs/MerkleForge/releases/tag/v0.1.0

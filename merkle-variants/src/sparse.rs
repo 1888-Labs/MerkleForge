@@ -22,14 +22,15 @@
 //! assert_eq!(tree.empty_hash_at(0), &Sha256::empty());
 //! ```
 
-use std::collections::HashMap;
+use core::fmt;
+use std::collections::{BTreeMap, HashMap, btree_map};
 
 use merkle_core::{
     error::MerkleError,
     traits::{HashFunction, MerkleTree},
     types::{LeafIndex, MerkleProof, ProofNode, ProofSide, TreeMetadata},
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Fixed tree depth for `MerkleForge` sparse Merkle trees.
 pub const SPARSE_TREE_DEPTH: usize = 256;
@@ -72,6 +73,17 @@ pub enum NodeEntry<D> {
     },
     /// A compact batch containing all non-empty leaves in a small subtree.
     Batch(SubtreeBatch<D>),
+}
+
+impl<D> NodeEntry<D> {
+    /// Returns the logical sparse Merkle commitment stored by this entry.
+    #[must_use]
+    pub const fn commitment(&self) -> &D {
+        match self {
+            Self::Leaf(hash) | Self::Internal(hash) | Self::Shortcut { hash, .. } => hash,
+            Self::Batch(batch) => &batch.root,
+        }
+    }
 }
 
 /// A key-addressed sparse Merkle membership proof.
@@ -140,6 +152,38 @@ impl NodeKey {
         sibling.path[byte_index] ^= 1 << bit_offset;
         sibling
     }
+
+    /// Returns the key of this node's left (`false`) or right (`true`) child.
+    fn child(self, bit: bool) -> Self {
+        debug_assert!(self.depth < SPARSE_TREE_DEPTH);
+
+        let mut path = self.path;
+        if bit {
+            path[self.depth / 8] |= 1 << (7 - self.depth % 8);
+        }
+        Self {
+            depth: self.depth + 1,
+            path,
+        }
+    }
+
+    /// Returns the largest 256-bit key under this node's prefix.
+    fn last_key(self) -> [u8; 32] {
+        let mut last = self.path;
+        let full_bytes = self.depth / 8;
+        let remaining_bits = self.depth % 8;
+        let mut first_free_byte = full_bytes;
+
+        if remaining_bits > 0 {
+            last[full_bytes] |= u8::MAX >> remaining_bits;
+            first_free_byte += 1;
+        }
+        for byte in &mut last[first_free_byte..] {
+            *byte = u8::MAX;
+        }
+
+        last
+    }
 }
 
 /// A sparse Merkle tree over a 256-bit key space.
@@ -148,14 +192,19 @@ impl NodeKey {
 /// compact 256-bit path. Empty subtrees are represented by a precomputed hash
 /// cache: index `0` is the empty leaf hash and index `256` is the root of a
 /// fully empty tree.
+///
+/// Every stored node holds the commitment of its whole subtree, so inserts
+/// and removals only recompute nodes on the changed key paths, and proofs read
+/// sibling commitments directly from storage.
 pub struct SparseMerkleTree<H: HashFunction> {
     nodes: HashMap<NodeKey, NodeEntry<H::Digest>>,
-    leaves: HashMap<[u8; 32], H::Digest>,
+    leaves: BTreeMap<[u8; 32], H::Digest>,
     leaf_count: usize,
     depth: usize,
     root: H::Digest,
     empty_hashes: Vec<H::Digest>,
     last_node_accesses: usize,
+    next_index_hint: usize,
 }
 
 impl<H: HashFunction> SparseMerkleTree<H> {
@@ -177,20 +226,21 @@ impl<H: HashFunction> SparseMerkleTree<H> {
 
         Self {
             nodes: HashMap::new(),
-            leaves: HashMap::new(),
+            leaves: BTreeMap::new(),
             leaf_count: 0,
             depth: SPARSE_TREE_DEPTH,
             root,
             empty_hashes,
             last_node_accesses: 0,
+            next_index_hint: 0,
         }
     }
 
     /// Inserts or overwrites the leaf at `key` with `data`.
     ///
     /// The value is hashed with [`HashFunction::hash`] before being stored.
-    /// Only the 256 nodes on the key path are recomputed; missing siblings use
-    /// the precomputed empty-hash cache.
+    /// Only the stored nodes on the key path are recomputed; missing siblings
+    /// use the precomputed empty-hash cache.
     ///
     /// # Errors
     ///
@@ -204,17 +254,17 @@ impl<H: HashFunction> SparseMerkleTree<H> {
         if was_empty {
             self.leaf_count += 1;
         }
-        self.rebuild_shortcuts();
+        self.apply_changes(&[key]);
 
         Ok(())
     }
 
     /// Inserts or overwrites many leaves with one bottom-up recompute pass.
     ///
-    /// Updates are sorted by key so leaves with shared prefixes are grouped
-    /// before the compressed tree is rebuilt. Unlike repeatedly calling
-    /// [`Self::insert`], this applies every leaf change first and then rebuilds
-    /// affected storage once.
+    /// Updates are sorted by key so leaves with shared prefixes are grouped.
+    /// Unlike repeatedly calling [`Self::insert`], this applies every leaf
+    /// change first and then recomputes each affected node once. When a key
+    /// appears more than once, the last value wins.
     ///
     /// # Errors
     ///
@@ -233,14 +283,17 @@ impl<H: HashFunction> SparseMerkleTree<H> {
         sorted_updates.sort_by_key(|(key, _)| *key);
 
         let mut inserted = 0_usize;
+        let mut changed = Vec::with_capacity(sorted_updates.len());
         for (key, data) in sorted_updates {
             if self.leaves.insert(key, H::hash(&data)).is_none() {
                 inserted += 1;
             }
+            changed.push(key);
         }
+        changed.dedup();
 
         self.leaf_count += inserted;
-        self.rebuild_shortcuts();
+        self.apply_changes(&changed);
 
         Ok(())
     }
@@ -262,7 +315,7 @@ impl<H: HashFunction> SparseMerkleTree<H> {
         }
 
         self.leaf_count -= 1;
-        self.rebuild_shortcuts();
+        self.apply_changes(&[key]);
 
         Ok(())
     }
@@ -270,7 +323,7 @@ impl<H: HashFunction> SparseMerkleTree<H> {
     /// Removes many leaves with one bottom-up recompute pass.
     ///
     /// Keys are sorted by prefix before mutation so shared affected ancestors
-    /// are handled together when the compressed tree is rebuilt.
+    /// are recomputed once.
     ///
     /// # Errors
     ///
@@ -296,7 +349,7 @@ impl<H: HashFunction> SparseMerkleTree<H> {
         }
 
         self.leaf_count -= sorted_keys.len();
-        self.rebuild_shortcuts();
+        self.apply_changes(&sorted_keys);
 
         Ok(())
     }
@@ -422,7 +475,7 @@ impl<H: HashFunction> SparseMerkleTree<H> {
         self.nodes.len()
     }
 
-    /// Returns the number of materialized nodes touched by the last rebuild.
+    /// Returns the number of materialized nodes written by the last mutation.
     ///
     /// This is primarily useful for validating shortcut-node compression in
     /// tests and benchmarks.
@@ -438,13 +491,39 @@ impl<H: HashFunction> SparseMerkleTree<H> {
         Self::count_unbatched_entries(0, &self.leaf_entries())
     }
 
+    /// Verifies that `key` holds `leaf_data` in the tree with `expected_root`.
+    ///
+    /// The proof must be for `key`, `leaf_data` must hash to the proof's leaf
+    /// hash, and the reconstructed root must equal `expected_root`.
+    #[must_use]
+    pub fn verify_membership(
+        expected_root: &H::Digest,
+        key: [u8; 32],
+        leaf_data: &[u8],
+        proof: &SparseMerkleProof<H::Digest>,
+    ) -> bool {
+        proof.key == key && Self::verify_proof_key_unchecked(expected_root, leaf_data, proof)
+    }
+
     /// Verifies a sparse Merkle membership proof without needing the tree.
     ///
-    /// `leaf_data` is hashed and compared with the proof's embedded leaf hash
-    /// before root reconstruction. This ensures a proof for the right key but
-    /// wrong value is rejected.
+    /// This does **not** check which key the proof is for: a valid proof for
+    /// any key holding `leaf_data` is accepted. Use
+    /// [`Self::verify_membership`], which takes the expected key.
+    #[deprecated(
+        since = "0.5.0",
+        note = "does not check the proof's key; use `verify_membership`"
+    )]
     #[must_use]
     pub fn verify(
+        expected_root: &H::Digest,
+        leaf_data: &[u8],
+        proof: &SparseMerkleProof<H::Digest>,
+    ) -> bool {
+        Self::verify_proof_key_unchecked(expected_root, leaf_data, proof)
+    }
+
+    fn verify_proof_key_unchecked(
         expected_root: &H::Digest,
         leaf_data: &[u8],
         proof: &SparseMerkleProof<H::Digest>,
@@ -476,6 +555,10 @@ impl<H: HashFunction> SparseMerkleTree<H> {
                 == expected_root.as_ref()
     }
 
+    /// Rebuilds all stored nodes from the leaf set.
+    ///
+    /// Mutations use [`Self::apply_changes`] instead; this is only needed when
+    /// the leaf set is replaced wholesale, such as after deserialization.
     fn rebuild_shortcuts(&mut self) {
         self.nodes.clear();
         self.last_node_accesses = 0;
@@ -485,12 +568,133 @@ impl<H: HashFunction> SparseMerkleTree<H> {
             return;
         }
 
-        let leaves = self
-            .leaves
-            .iter()
-            .map(|(key, hash)| (*key, hash.clone()))
-            .collect::<Vec<_>>();
+        let leaves = self.leaf_entries();
         self.root = self.build_compressed_subtree(0, &leaves);
+    }
+
+    /// Recomputes the stored nodes on the paths of `changed` keys after their
+    /// leaves were updated in `self.leaves`.
+    ///
+    /// `changed` must be sorted and free of duplicates. The resulting storage
+    /// is identical to a full [`Self::rebuild_shortcuts`].
+    fn apply_changes(&mut self, changed: &[[u8; 32]]) {
+        self.last_node_accesses = 0;
+        let Some(first) = changed.first() else {
+            return;
+        };
+
+        let root = self.update_subtree(NodeKey::new(*first, 0), changed);
+        self.root = root.unwrap_or_else(|| self.empty_hashes[self.depth].clone());
+    }
+
+    /// Rewrites the canonical stored node at `node_key` and returns its
+    /// commitment, or `None` when the subtree is empty.
+    ///
+    /// Only children containing a key from `changed` are revisited; other
+    /// children of an existing internal node keep their stored commitments.
+    fn update_subtree(&mut self, node_key: NodeKey, changed: &[[u8; 32]]) -> Option<H::Digest> {
+        let depth = node_key.depth;
+
+        if self.depth - depth <= BATCH_DEPTH {
+            let leaves = self.leaves_under(node_key);
+            if leaves.is_empty() {
+                self.nodes.remove(&node_key);
+                return None;
+            }
+
+            let batch = self.build_batch(depth, &leaves);
+            let root = batch.root.clone();
+            self.nodes.insert(node_key, NodeEntry::Batch(batch));
+            self.last_node_accesses += 1;
+            return Some(root);
+        }
+
+        let mut under = self.leaf_range(node_key);
+        let first = under.next().map(|(key, hash)| (*key, hash.clone()));
+        let has_second = under.next().is_some();
+
+        let Some((key, leaf_hash)) = first else {
+            self.purge_subtree(node_key);
+            return None;
+        };
+
+        if !has_second {
+            self.purge_children(node_key);
+            let hash = Self::single_leaf_subtree_root(&key, leaf_hash, depth, &self.empty_hashes);
+            self.nodes.insert(
+                node_key,
+                NodeEntry::Shortcut {
+                    prefix: u8::try_from(depth).expect("shortcut depth is less than 256"),
+                    hash: hash.clone(),
+                },
+            );
+            self.last_node_accesses += 1;
+            return Some(hash);
+        }
+
+        let was_internal = matches!(self.nodes.get(&node_key), Some(NodeEntry::Internal(_)));
+        // Keys share this node's prefix and are sorted, so every key going
+        // left precedes every key going right.
+        let split = changed.partition_point(|key| !bit_at(key, depth));
+        let (left_changed, right_changed) = changed.split_at(split);
+
+        let left = self.child_commitment(node_key.child(false), left_changed, was_internal);
+        let right = self.child_commitment(node_key.child(true), right_changed, was_internal);
+        let empty = &self.empty_hashes[self.depth - depth - 1];
+        let node_hash = H::hash_nodes(
+            left.as_ref().unwrap_or(empty),
+            right.as_ref().unwrap_or(empty),
+        );
+
+        self.nodes
+            .insert(node_key, NodeEntry::Internal(node_hash.clone()));
+        self.last_node_accesses += 1;
+
+        Some(node_hash)
+    }
+
+    fn child_commitment(
+        &mut self,
+        child: NodeKey,
+        changed: &[[u8; 32]],
+        parent_was_internal: bool,
+    ) -> Option<H::Digest> {
+        if parent_was_internal && changed.is_empty() {
+            // Every non-empty child of an internal node is stored, so an
+            // untouched child's stored commitment is still current.
+            return self
+                .nodes
+                .get(&child)
+                .map(|entry| entry.commitment().clone());
+        }
+
+        self.update_subtree(child, changed)
+    }
+
+    /// Removes the stored node at `node_key` and everything stored below it.
+    fn purge_subtree(&mut self, node_key: NodeKey) {
+        if let Some(NodeEntry::Internal(_)) = self.nodes.remove(&node_key) {
+            self.purge_subtree(node_key.child(false));
+            self.purge_subtree(node_key.child(true));
+        }
+    }
+
+    /// Removes everything stored below `node_key`, keeping the node itself.
+    fn purge_children(&mut self, node_key: NodeKey) {
+        if let Some(NodeEntry::Internal(_)) = self.nodes.get(&node_key) {
+            self.purge_subtree(node_key.child(false));
+            self.purge_subtree(node_key.child(true));
+        }
+    }
+
+    fn leaf_range(&self, node_key: NodeKey) -> btree_map::Range<'_, [u8; 32], H::Digest> {
+        self.leaves.range(node_key.path..=node_key.last_key())
+    }
+
+    fn leaves_under(&self, node_key: NodeKey) -> Vec<([u8; 32], H::Digest)> {
+        self.leaf_range(node_key)
+            .map(|(key, hash)| (*key, hash.clone()))
+            .collect()
     }
 
     fn build_compressed_subtree(
@@ -645,15 +849,31 @@ impl<H: HashFunction> SparseMerkleTree<H> {
         current
     }
 
+    /// Returns the commitment of the subtree at `node_key`, or `None` when it
+    /// is empty.
     fn subtree_hash_at(&self, node_key: NodeKey) -> Option<H::Digest> {
-        let leaves = self
-            .leaves
-            .iter()
-            .filter(|(key, _)| NodeKey::new(**key, node_key.depth) == node_key)
-            .map(|(key, hash)| (*key, hash.clone()))
-            .collect::<Vec<_>>();
+        if let Some(entry) = self.nodes.get(&node_key) {
+            return Some(entry.commitment().clone());
+        }
 
-        Self::subtree_root_from_leaves(node_key.depth, &leaves, &self.empty_hashes)
+        // Not stored: the subtree is empty, lies under a shortcut (one leaf),
+        // or lies inside a batch (at most 2^BATCH_DEPTH leaves).
+        let mut under = self.leaf_range(node_key);
+        let (key, leaf_hash) = under.next()?;
+        if under.next().is_none() {
+            return Some(Self::single_leaf_subtree_root(
+                key,
+                leaf_hash.clone(),
+                node_key.depth,
+                &self.empty_hashes,
+            ));
+        }
+
+        Self::subtree_root_from_leaves(
+            node_key.depth,
+            &self.leaves_under(node_key),
+            &self.empty_hashes,
+        )
     }
 
     fn subtree_root_from_leaves(
@@ -725,6 +945,23 @@ impl<H: HashFunction> SparseMerkleTree<H> {
         key[24..].copy_from_slice(&(index.value() as u64).to_be_bytes());
         key
     }
+
+    /// Returns the key of an occupied trait-addressed leaf.
+    fn existing_index_key(&self, index: LeafIndex) -> Result<[u8; 32], MerkleError> {
+        if self.is_empty() {
+            return Err(MerkleError::EmptyTree);
+        }
+
+        let key = Self::key_for_leaf_index(index);
+        if self.leaves.contains_key(&key) {
+            Ok(key)
+        } else {
+            Err(MerkleError::IndexOutOfBounds {
+                index: index.value(),
+                len: self.leaf_count,
+            })
+        }
+    }
 }
 
 /// Returns the bit at `depth` in `key`, reading most-significant bit first.
@@ -755,26 +992,33 @@ impl<H: HashFunction> Default for SparseMerkleTree<H> {
     }
 }
 
+/// Index-addressed adapter over the key-addressed tree.
+///
+/// Leaf index `i` is stored at a key whose last 8 bytes are `i` in big-endian
+/// order. [`MerkleTree::insert`] returns the first unoccupied index at or above
+/// the leaf count, so it never overwrites an existing leaf, even after
+/// removals. Operations on an index with no leaf return
+/// [`MerkleError::IndexOutOfBounds`].
 impl<H: HashFunction> MerkleTree<H> for SparseMerkleTree<H> {
     fn insert(&mut self, data: &[u8]) -> Result<LeafIndex, MerkleError> {
-        let index = LeafIndex(self.leaf_count);
-        Self::insert(self, Self::key_for_leaf_index(index), data)?;
+        let mut index = self.leaf_count.max(self.next_index_hint);
+        while self
+            .leaves
+            .contains_key(&Self::key_for_leaf_index(LeafIndex(index)))
+        {
+            index += 1;
+        }
 
-        Ok(index)
+        Self::insert(self, Self::key_for_leaf_index(LeafIndex(index)), data)?;
+        self.next_index_hint = index + 1;
+
+        Ok(LeafIndex(index))
     }
 
     fn remove(&mut self, index: LeafIndex) -> Result<(), MerkleError> {
-        if self.is_empty() {
-            return Err(MerkleError::EmptyTree);
-        }
-        if index.value() >= self.leaf_count {
-            return Err(MerkleError::IndexOutOfBounds {
-                index: index.value(),
-                len: self.leaf_count,
-            });
-        }
+        let key = self.existing_index_key(index)?;
 
-        Self::remove(self, Self::key_for_leaf_index(index))
+        Self::remove(self, key)
     }
 
     fn root(&self) -> Option<&H::Digest> {
@@ -794,17 +1038,7 @@ impl<H: HashFunction> MerkleTree<H> for SparseMerkleTree<H> {
     }
 
     fn generate_proof(&self, index: LeafIndex) -> Result<MerkleProof<H::Digest>, MerkleError> {
-        if self.is_empty() {
-            return Err(MerkleError::EmptyTree);
-        }
-        if index.value() >= self.leaf_count {
-            return Err(MerkleError::IndexOutOfBounds {
-                index: index.value(),
-                len: self.leaf_count,
-            });
-        }
-
-        let key = Self::key_for_leaf_index(index);
+        let key = self.existing_index_key(index)?;
         let proof = self.generate_membership_proof(key)?;
         if proof.leaf.is_none() {
             return Err(MerkleError::UnsupportedOperation(
@@ -844,6 +1078,93 @@ impl<H: HashFunction> MerkleTree<H> for SparseMerkleTree<H> {
             hash_algorithm: H::algorithm_name(),
             variant: "SparseMerkleTree",
         }
+    }
+}
+
+impl<H: HashFunction> Clone for SparseMerkleTree<H> {
+    fn clone(&self) -> Self {
+        Self {
+            nodes: self.nodes.clone(),
+            leaves: self.leaves.clone(),
+            leaf_count: self.leaf_count,
+            depth: self.depth,
+            root: self.root.clone(),
+            empty_hashes: self.empty_hashes.clone(),
+            last_node_accesses: self.last_node_accesses,
+            next_index_hint: self.next_index_hint,
+        }
+    }
+}
+
+impl<H: HashFunction> fmt::Debug for SparseMerkleTree<H> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SparseMerkleTree")
+            .field("hash_algorithm", &H::algorithm_name())
+            .field("leaf_count", &self.leaf_count)
+            .field("stored_node_count", &self.nodes.len())
+            .field("root", &self.root())
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Serialize)]
+struct SparseTreeReprRef<'a, D> {
+    hash_algorithm: &'a str,
+    leaves: Vec<(&'a [u8; 32], &'a D)>,
+}
+
+#[derive(Deserialize)]
+struct SparseTreeRepr<D> {
+    hash_algorithm: String,
+    leaves: Vec<([u8; 32], D)>,
+}
+
+/// Serializes the hash algorithm name and the `(key, leaf hash)` pairs in key
+/// order.
+///
+/// Internal storage is not serialized; deserialization rebuilds it, so a
+/// decoded tree is always internally consistent.
+impl<H: HashFunction> Serialize for SparseMerkleTree<H>
+where
+    H::Digest: Serialize,
+{
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        SparseTreeReprRef {
+            hash_algorithm: H::algorithm_name(),
+            leaves: self.leaves.iter().collect(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de, H: HashFunction> Deserialize<'de> for SparseMerkleTree<H>
+where
+    H::Digest: Deserialize<'de>,
+{
+    fn deserialize<De: Deserializer<'de>>(deserializer: De) -> Result<Self, De::Error> {
+        let repr = SparseTreeRepr::<H::Digest>::deserialize(deserializer)?;
+        if repr.hash_algorithm != H::algorithm_name() {
+            return Err(serde::de::Error::custom(format!(
+                "tree was built with {}, expected {}",
+                repr.hash_algorithm,
+                H::algorithm_name()
+            )));
+        }
+
+        let mut tree = Self::new();
+        let empty_leaf = H::empty();
+        for (key, leaf_hash) in repr.leaves {
+            if leaf_hash == empty_leaf {
+                return Err(serde::de::Error::custom("leaf hash equals the empty leaf"));
+            }
+            if tree.leaves.insert(key, leaf_hash).is_some() {
+                return Err(serde::de::Error::custom("duplicate sparse key"));
+            }
+        }
+        tree.leaf_count = tree.leaves.len();
+        tree.rebuild_shortcuts();
+
+        Ok(tree)
     }
 }
 
@@ -1018,7 +1339,25 @@ mod tests {
         assert_eq!(proof.key, key);
         assert_eq!(proof.siblings.len(), SPARSE_TREE_DEPTH);
         assert_eq!(proof.leaf, Some(Sha256::hash(b"alice")));
-        assert!(SparseMerkleTree::<Sha256>::verify(&root, b"alice", &proof));
+        assert!(SparseMerkleTree::<Sha256>::verify_membership(
+            &root, key, b"alice", &proof
+        ));
+    }
+
+    #[test]
+    fn membership_proof_for_other_key_fails() {
+        let mut tree = SparseMerkleTree::<Sha256>::new();
+        let key = [10_u8; 32];
+        let other = [20_u8; 32];
+
+        tree.insert(key, b"alice").unwrap();
+        tree.insert(other, b"alice").unwrap();
+        let proof = tree.generate_membership_proof(key).unwrap();
+        let root = *tree.root().unwrap();
+
+        assert!(!SparseMerkleTree::<Sha256>::verify_membership(
+            &root, other, b"alice", &proof
+        ));
     }
 
     #[test]
@@ -1030,8 +1369,8 @@ mod tests {
         let proof = tree.generate_membership_proof(key).unwrap();
         let root = *tree.root().unwrap();
 
-        assert!(!SparseMerkleTree::<Sha256>::verify(
-            &root, b"mallory", &proof
+        assert!(!SparseMerkleTree::<Sha256>::verify_membership(
+            &root, key, b"mallory", &proof
         ));
     }
 
@@ -1054,7 +1393,9 @@ mod tests {
         sibling[0] ^= 1;
 
         let root = *tree.root().unwrap();
-        assert!(!SparseMerkleTree::<Sha256>::verify(&root, b"alice", &proof));
+        assert!(!SparseMerkleTree::<Sha256>::verify_membership(
+            &root, first, b"alice", &proof
+        ));
     }
 
     #[test]
@@ -1221,7 +1562,9 @@ mod tests {
         let root = *tree.root().unwrap();
         for (key, value) in keys {
             let proof = tree.generate_membership_proof(key).unwrap();
-            assert!(SparseMerkleTree::<Sha256>::verify(&root, &value, &proof));
+            assert!(SparseMerkleTree::<Sha256>::verify_membership(
+                &root, key, &value, &proof
+            ));
         }
     }
 
@@ -1265,7 +1608,9 @@ mod tests {
 
         let root = *tree.root().unwrap();
         let proof = tree.generate_membership_proof(first).unwrap();
-        assert!(SparseMerkleTree::<Sha256>::verify(&root, b"alice", &proof));
+        assert!(SparseMerkleTree::<Sha256>::verify_membership(
+            &root, first, b"alice", &proof
+        ));
     }
 
     #[test]
@@ -1324,13 +1669,15 @@ mod tests {
         let first_proof = tree.generate_membership_proof(first).unwrap();
         let second_proof = tree.generate_membership_proof(second).unwrap();
 
-        assert!(SparseMerkleTree::<Sha256>::verify(
+        assert!(SparseMerkleTree::<Sha256>::verify_membership(
             &root,
+            first,
             b"alice",
             &first_proof
         ));
-        assert!(SparseMerkleTree::<Sha256>::verify(
+        assert!(SparseMerkleTree::<Sha256>::verify_membership(
             &root,
+            second,
             b"bob",
             &second_proof
         ));
@@ -1564,5 +1911,188 @@ mod tests {
             <SparseMerkleTree<Sha256> as MerkleTree<Sha256>>::generate_proof(&tree, LeafIndex(1)),
             Err(MerkleError::IndexOutOfBounds { index: 1, len: 1 })
         );
+    }
+
+    /// Small deterministic generator for randomized structural tests.
+    struct XorShift(u64);
+
+    impl XorShift {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        fn key(&mut self) -> [u8; 32] {
+            let mut key = [0_u8; 32];
+            // Mix shared prefixes, shortcut-only paths, and dense batches.
+            match self.next() % 3 {
+                0 => key[31] = (self.next() % 48) as u8,
+                1 => key[0] = (self.next() % 4) as u8,
+                _ => {
+                    for chunk in key.chunks_mut(8) {
+                        chunk.copy_from_slice(&self.next().to_be_bytes());
+                    }
+                }
+            }
+            key
+        }
+    }
+
+    #[test]
+    fn incremental_updates_match_full_rebuild() {
+        let mut rng = XorShift(0x5EED);
+        let mut tree = SparseMerkleTree::<Sha256>::new();
+        let mut keys = Vec::new();
+
+        for step in 0..240 {
+            match rng.next() % 6 {
+                0..=2 => {
+                    let key = rng.key();
+                    tree.insert(key, &rng.next().to_be_bytes()).unwrap();
+                    keys.push(key);
+                }
+                3 => {
+                    let updates = (0..4)
+                        .map(|_| (rng.key(), rng.next().to_be_bytes().to_vec()))
+                        .collect::<Vec<_>>();
+                    keys.extend(updates.iter().map(|(key, _)| *key));
+                    tree.batch_insert(&updates).unwrap();
+                }
+                _ if !keys.is_empty() => {
+                    let key = keys.swap_remove(rng.next() as usize % keys.len());
+                    if tree.get(key).is_some() {
+                        tree.remove(key).unwrap();
+                    }
+                }
+                _ => {}
+            }
+
+            // The full rebuild is the slow reference, so compare periodically.
+            if step % 8 != 0 {
+                continue;
+            }
+            let mut rebuilt = tree.clone();
+            rebuilt.rebuild_shortcuts();
+            assert_eq!(tree.nodes, rebuilt.nodes, "storage differs at step {step}");
+            assert_eq!(tree.root, rebuilt.root, "root differs at step {step}");
+        }
+    }
+
+    #[test]
+    fn proofs_match_leaf_scan_reference() {
+        let mut rng = XorShift(0xC0FFEE);
+        let mut tree = SparseMerkleTree::<Sha256>::new();
+        for _ in 0..120 {
+            tree.insert(rng.key(), &rng.next().to_be_bytes()).unwrap();
+        }
+
+        let leaves = tree.leaf_entries();
+        let probes = leaves
+            .iter()
+            .map(|(key, _)| *key)
+            .take(12)
+            .chain((0..12).map(|_| rng.key()))
+            .collect::<Vec<_>>();
+
+        for key in probes {
+            let proof = tree.generate_membership_proof(key).unwrap();
+            for (level, sibling) in proof.siblings.iter().enumerate() {
+                let sibling_key = NodeKey::sibling(key, SPARSE_TREE_DEPTH - level);
+                let under = leaves
+                    .iter()
+                    .filter(|(leaf_key, _)| {
+                        NodeKey::new(*leaf_key, sibling_key.depth) == sibling_key
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let expected = SparseMerkleTree::<Sha256>::subtree_root_from_leaves(
+                    sibling_key.depth,
+                    &under,
+                    &tree.empty_hashes,
+                );
+                assert_eq!(sibling, &expected, "level {level}");
+            }
+        }
+    }
+
+    #[test]
+    fn trait_insert_after_remove_does_not_overwrite() {
+        let mut tree = SparseMerkleTree::<Sha256>::new();
+        for data in [b"a", b"b", b"c"] {
+            MerkleTree::insert(&mut tree, data).unwrap();
+        }
+        MerkleTree::remove(&mut tree, LeafIndex(0)).unwrap();
+
+        let index = MerkleTree::insert(&mut tree, b"d").unwrap();
+
+        assert_eq!(index, LeafIndex(3));
+        assert_eq!(MerkleTree::leaf_count(&tree), 3);
+        let c_key = SparseMerkleTree::<Sha256>::key_for_leaf_index(LeafIndex(2));
+        assert_eq!(tree.get(c_key), Some(&Sha256::hash(b"c")));
+        assert!(MerkleTree::generate_proof(&tree, LeafIndex(3)).is_ok());
+    }
+
+    #[test]
+    fn trait_operations_on_removed_index_are_rejected() {
+        let mut tree = SparseMerkleTree::<Sha256>::new();
+        for data in [b"a", b"b"] {
+            MerkleTree::insert(&mut tree, data).unwrap();
+        }
+        MerkleTree::remove(&mut tree, LeafIndex(0)).unwrap();
+
+        let expected = Err(MerkleError::IndexOutOfBounds { index: 0, len: 1 });
+        assert_eq!(MerkleTree::remove(&mut tree, LeafIndex(0)), expected);
+        assert_eq!(
+            MerkleTree::generate_proof(&tree, LeafIndex(0)).map(|_| ()),
+            expected
+        );
+        assert!(MerkleTree::generate_proof(&tree, LeafIndex(1)).is_ok());
+    }
+
+    #[test]
+    fn serialization_round_trips_and_rebuilds_storage() {
+        let mut rng = XorShift(7);
+        let mut tree = SparseMerkleTree::<Sha256>::new();
+        for _ in 0..50 {
+            tree.insert(rng.key(), &rng.next().to_be_bytes()).unwrap();
+        }
+
+        let bytes = tree.to_bytes().unwrap();
+        let decoded = SparseMerkleTree::<Sha256>::from_bytes(&bytes).unwrap();
+
+        assert_eq!(decoded.root(), tree.root());
+        assert_eq!(decoded.leaf_count(), tree.leaf_count());
+        assert_eq!(decoded.nodes, tree.nodes);
+    }
+
+    #[test]
+    fn deserialization_rejects_other_hash_algorithm() {
+        let mut tree = SparseMerkleTree::<Sha256>::new();
+        tree.insert([1_u8; 32], b"alice").unwrap();
+        let bytes = tree.to_bytes().unwrap();
+
+        assert!(SparseMerkleTree::<merkleforge_hash::Blake3>::from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn deserialization_rejects_empty_leaf_hash() {
+        let repr = ("SHA-256".to_string(), vec![([1_u8; 32], Sha256::empty())]);
+        let bytes = repr.to_bytes().unwrap();
+
+        assert!(SparseMerkleTree::<Sha256>::from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn clone_is_independent_and_debug_summarizes() {
+        let mut original = SparseMerkleTree::<Sha256>::new();
+        original.insert([1_u8; 32], b"alice").unwrap();
+        let mut copy = original.clone();
+        copy.insert([2_u8; 32], b"bob").unwrap();
+
+        assert_eq!(original.leaf_count(), 1);
+        assert_ne!(original.root(), copy.root());
+        assert!(format!("{original:?}").contains("leaf_count: 1"));
     }
 }

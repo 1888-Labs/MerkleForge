@@ -5,15 +5,14 @@
 //! encoding, Ethereum-style node references, root hashing, and basic
 //! key-value mutation.
 
-use std::{collections::HashMap, marker::PhantomData};
+use core::{fmt, marker::PhantomData};
 
 use merkle_core::{
     error::MerkleError,
     traits::{HashFunction, MerkleTree},
     types::{LeafIndex, MerkleProof, TreeMetadata},
 };
-use serde::{Deserialize, Serialize};
-use tiny_keccak::{Hasher, Keccak};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 const EMPTY_RLP: u8 = 0x80;
 const SHORT_STRING_OFFSET: u8 = 0x80;
@@ -54,12 +53,6 @@ impl NibblePath {
         }
 
         Ok(Self { nibbles })
-    }
-
-    fn prefix(&self, len: usize) -> Self {
-        Self {
-            nibbles: self.nibbles[..len].to_vec(),
-        }
     }
 
     /// Returns the number of nibbles in this path.
@@ -146,7 +139,7 @@ pub fn hp_decode(bytes: &[u8]) -> (NibblePath, bool) {
 #[must_use]
 pub fn rlp_encode<D: AsRef<[u8]>>(node: &MptNode<D>) -> Vec<u8> {
     match node {
-        MptNode::Empty | MptNode::__DigestMarker(_) => vec![EMPTY_RLP],
+        MptNode::Empty => vec![EMPTY_RLP],
         MptNode::Leaf { key_suffix, value } => rlp_encode_list(&[
             rlp_encode_bytes(&hp_encode(key_suffix, true)),
             rlp_encode_bytes(value),
@@ -254,7 +247,6 @@ impl<D> MptProof<D> {
 pub fn hash_node<H>(node: &MptNode<H::Digest>) -> NodeRef<H::Digest>
 where
     H: HashFunction,
-    H::Digest: From<[u8; 32]>,
 {
     let rlp = rlp_encode(node);
     if rlp.len() >= 32 {
@@ -272,7 +264,6 @@ where
 pub fn compute_root_hash<H>(root: &MptNode<H::Digest>) -> H::Digest
 where
     H: HashFunction,
-    H::Digest: From<[u8; 32]>,
 {
     hash_mpt_bytes::<H>(&rlp_encode(root))
 }
@@ -280,8 +271,7 @@ where
 /// A Merkle Patricia Trie node.
 ///
 /// The public variants mirror Ethereum's four logical MPT node types: empty,
-/// leaf, extension, and branch. The hidden marker variant exists only to make
-/// the digest type parameter available before later issues add node hashing.
+/// leaf, extension, and branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MptNode<D> {
     /// Empty slot with no data at this path.
@@ -310,9 +300,6 @@ pub enum MptNode<D> {
         /// Value stored exactly at this branch path, if any.
         value: Option<Vec<u8>>,
     },
-
-    #[doc(hidden)]
-    __DigestMarker(PhantomData<D>),
 }
 
 impl<D> MptNode<D> {
@@ -327,37 +314,91 @@ impl<D> MptNode<D> {
 /// The trie supports key-value insertion, removal, lookup, RLP witness
 /// generation, and Ethereum-compatible root hashing when used with
 /// `Keccak-256`.
+///
+/// Nodes form an owned tree, and every node caches its Ethereum node
+/// reference (inline RLP or hash). A mutation therefore re-encodes and
+/// re-hashes only the nodes on the changed key path.
 pub struct MerklePatriciaTrie<H: HashFunction> {
-    root: MptNode<H::Digest>,
+    root: Option<Box<TrieNode<H::Digest>>>,
     root_hash: Option<H::Digest>,
-    node_count: usize,
-    entries: HashMap<Vec<u8>, Vec<u8>>,
-    nodes: HashMap<Vec<u8>, MptNode<H::Digest>>,
-    _marker: PhantomData<H>,
+    len: usize,
+    next_index_hint: usize,
 }
 
-impl<H> MerklePatriciaTrie<H>
-where
-    H: HashFunction,
-    H::Digest: From<[u8; 32]>,
-{
+/// A trie node together with values cached from its subtree.
+#[derive(Clone)]
+struct TrieNode<D> {
+    kind: TrieNodeKind<D>,
+    /// How a parent embeds this node: inline RLP, or the hash of its RLP.
+    reference: NodeRef<D>,
+    /// Number of nodes in this subtree, including this one.
+    node_count: usize,
+    /// Longest node path from this node to a leaf, including this node.
+    height: usize,
+}
+
+#[derive(Clone)]
+enum TrieNodeKind<D> {
+    Leaf {
+        path: Vec<u8>,
+        value: Vec<u8>,
+    },
+    Extension {
+        path: Vec<u8>,
+        child: Box<TrieNode<D>>,
+    },
+    Branch {
+        children: [Option<Box<TrieNode<D>>>; 16],
+        value: Option<Vec<u8>>,
+    },
+}
+
+impl<D: Clone> TrieNodeKind<D> {
+    /// Converts this node into its public encoding form.
+    fn to_mpt(&self) -> MptNode<D> {
+        match self {
+            Self::Leaf { path, value } => MptNode::Leaf {
+                key_suffix: NibblePath {
+                    nibbles: path.clone(),
+                },
+                value: value.clone(),
+            },
+            Self::Extension { path, child } => MptNode::Extension {
+                shared_prefix: NibblePath {
+                    nibbles: path.clone(),
+                },
+                child: child.reference.clone(),
+            },
+            Self::Branch { children, value } => MptNode::Branch {
+                children: Box::new(std::array::from_fn(|slot| {
+                    children[slot].as_ref().map_or_else(
+                        || NodeRef::Inline(vec![EMPTY_RLP]),
+                        |child| child.reference.clone(),
+                    )
+                })),
+                value: value.clone(),
+            },
+        }
+    }
+}
+
+type Children<D> = [Option<Box<TrieNode<D>>>; 16];
+
+impl<H: HashFunction> MerklePatriciaTrie<H> {
     /// Creates an empty Merkle Patricia Trie.
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            root: MptNode::Empty,
+            root: None,
             root_hash: None,
-            node_count: 0,
-            entries: HashMap::new(),
-            nodes: HashMap::new(),
-            _marker: PhantomData,
+            len: 0,
+            next_index_hint: 0,
         }
     }
 
     /// Inserts or updates `value` at `key`.
     ///
-    /// Keys are converted to nibble paths before the trie is rebuilt into its
-    /// compressed Patricia shape.
+    /// Only the nodes on the key's path are re-encoded and re-hashed.
     ///
     /// # Errors
     ///
@@ -367,24 +408,39 @@ where
             return Err(MerkleError::EmptyLeafData);
         }
 
-        self.entries.insert(key.to_vec(), value.to_vec());
-        self.rebuild();
+        if self.get(key).is_none() {
+            self.len += 1;
+        }
+        let path = bytes_to_nibbles(key);
+        self.root = Some(Self::insert_at(self.root.take(), &path, value.to_vec()));
+        self.refresh_root_hash();
 
         Ok(())
     }
 
     /// Removes the value stored at `key`.
     ///
-    /// Removal rebuilds the compressed Patricia shape from the remaining
-    /// entries. That canonical rebuild collapses branch and extension nodes
-    /// that no longer need to exist after the target leaf is deleted.
+    /// Branch and extension nodes that are no longer needed are collapsed, so
+    /// the trie keeps the same canonical shape (and root) as a trie built from
+    /// the remaining entries.
     ///
     /// # Errors
     ///
     /// Returns [`MerkleError::UnsupportedOperation`] when `key` is not present.
     pub fn remove(&mut self, key: &[u8]) -> Result<(), MerkleError> {
-        Self::remove_at(&mut self.entries, key)?;
-        self.collapse();
+        if self.get(key).is_none() {
+            return Err(MerkleError::UnsupportedOperation(
+                "remove missing Patricia key",
+            ));
+        }
+        let Some(root) = self.root.take() else {
+            return Err(MerkleError::EmptyTree);
+        };
+
+        let path = bytes_to_nibbles(key);
+        self.root = Self::remove_at(*root, &path);
+        self.len -= 1;
+        self.refresh_root_hash();
 
         Ok(())
     }
@@ -392,8 +448,28 @@ where
     /// Returns the value stored at `key`, if present.
     #[must_use]
     pub fn get(&self, key: &[u8]) -> Option<&[u8]> {
-        let path = NibblePath::from_key(key);
-        self.get_at(&self.root, &path).map(Vec::as_slice)
+        let path = bytes_to_nibbles(key);
+        let mut remaining = path.as_slice();
+        let mut node = self.root.as_deref()?;
+
+        loop {
+            match &node.kind {
+                TrieNodeKind::Leaf { path, value } => {
+                    return (path.as_slice() == remaining).then_some(value.as_slice());
+                }
+                TrieNodeKind::Extension { path, child } => {
+                    remaining = remaining.strip_prefix(path.as_slice())?;
+                    node = child;
+                }
+                TrieNodeKind::Branch { children, value } => match remaining.split_first() {
+                    None => return value.as_deref(),
+                    Some((nibble, rest)) => {
+                        node = children[usize::from(*nibble)].as_deref()?;
+                        remaining = rest;
+                    }
+                },
+            }
+        }
     }
 
     /// Generates an MPT witness for `key`.
@@ -406,13 +482,41 @@ where
     ///
     /// Returns [`MerkleError::EmptyTree`] when the trie is empty.
     pub fn generate_proof(&self, key: &[u8]) -> Result<MptProof<H::Digest>, MerkleError> {
-        if self.is_empty() {
+        let Some(root) = self.root.as_deref() else {
             return Err(MerkleError::EmptyTree);
-        }
+        };
 
-        let path = NibblePath::from_key(key);
+        let path = bytes_to_nibbles(key);
+        let mut remaining = path.as_slice();
+        let mut node = root;
         let mut proof_nodes = Vec::new();
-        let value = self.collect_proof_nodes(&self.root, &path, &mut proof_nodes);
+
+        let value = loop {
+            proof_nodes.push(rlp_encode(&node.kind.to_mpt()));
+
+            match &node.kind {
+                TrieNodeKind::Leaf { path, value } => {
+                    break (path.as_slice() == remaining).then(|| value.clone());
+                }
+                TrieNodeKind::Extension { path, child } => {
+                    let Some(rest) = remaining.strip_prefix(path.as_slice()) else {
+                        break None;
+                    };
+                    remaining = rest;
+                    node = child;
+                }
+                TrieNodeKind::Branch { children, value } => {
+                    let Some((nibble, rest)) = remaining.split_first() else {
+                        break value.clone();
+                    };
+                    let Some(child) = children[usize::from(*nibble)].as_deref() else {
+                        break None;
+                    };
+                    remaining = rest;
+                    node = child;
+                }
+            }
+        };
 
         Ok(MptProof::new(key.to_vec(), value, proof_nodes))
     }
@@ -444,199 +548,290 @@ where
         self.root_hash.as_ref()
     }
 
-    /// Returns `true` when the trie contains no materialized nodes.
+    /// Returns `true` when the trie contains no entries.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// Returns the number of key-value entries stored in the trie.
     #[must_use]
-    pub fn leaf_count(&self) -> usize {
-        self.entries.len()
+    pub const fn leaf_count(&self) -> usize {
+        self.len
     }
 
     /// Returns the number of materialized trie nodes.
     #[must_use]
-    pub const fn node_count(&self) -> usize {
-        self.node_count
+    pub fn node_count(&self) -> usize {
+        self.root.as_ref().map_or(0, |root| root.node_count)
     }
 
     /// Returns the longest node path from the root to any leaf.
     #[must_use]
     pub fn height(&self) -> usize {
-        self.height_at(&self.root)
+        self.root.as_ref().map_or(0, |root| root.height)
     }
 
-    fn rebuild(&mut self) {
-        self.nodes.clear();
+    /// Returns every `(key, value)` entry in ascending key order.
+    fn entries(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+        fn walk<D>(node: &TrieNode<D>, prefix: &mut Vec<u8>, out: &mut Vec<(Vec<u8>, Vec<u8>)>) {
+            let start = prefix.len();
+            match &node.kind {
+                TrieNodeKind::Leaf { path, value } => {
+                    prefix.extend_from_slice(path);
+                    out.push((nibbles_to_bytes(prefix), value.clone()));
+                }
+                TrieNodeKind::Extension { path, child } => {
+                    prefix.extend_from_slice(path);
+                    walk(child, prefix, out);
+                }
+                TrieNodeKind::Branch { children, value } => {
+                    if let Some(value) = value {
+                        out.push((nibbles_to_bytes(prefix), value.clone()));
+                    }
+                    for (nibble, child) in (0_u8..).zip(children) {
+                        if let Some(child) = child {
+                            prefix.push(nibble);
+                            walk(child, prefix, out);
+                            prefix.pop();
+                        }
+                    }
+                }
+            }
+            prefix.truncate(start);
+        }
 
-        let entries = self
-            .entries
-            .iter()
-            .map(|(key, value)| (NibblePath::from_key(key), value.clone()))
-            .collect::<Vec<_>>();
+        let mut out = Vec::with_capacity(self.len);
+        if let Some(root) = &self.root {
+            walk(root, &mut Vec::new(), &mut out);
+        }
+        out
+    }
 
-        self.root = Self::build_subtree(&entries, &mut self.nodes);
-        self.node_count = Self::count_nodes(&self.root, &self.nodes);
-        self.root_hash = if self.entries.is_empty() {
-            None
-        } else {
-            Some(compute_root_hash::<H>(&self.root))
+    fn refresh_root_hash(&mut self) {
+        self.root_hash = self.root.as_ref().map(|root| match &root.reference {
+            NodeRef::Hash(hash) => hash.clone(),
+            // The root is always hashed, even when a parent would inline it.
+            NodeRef::Inline(rlp) => hash_mpt_bytes::<H>(rlp),
+        });
+    }
+
+    fn make(kind: TrieNodeKind<H::Digest>) -> Box<TrieNode<H::Digest>> {
+        let reference = hash_node::<H>(&kind.to_mpt());
+        let (node_count, height) = match &kind {
+            TrieNodeKind::Leaf { .. } => (1, 1),
+            TrieNodeKind::Extension { child, .. } => (1 + child.node_count, 1 + child.height),
+            TrieNodeKind::Branch { children, .. } => children
+                .iter()
+                .flatten()
+                .fold((1, 1), |(count, height), child| {
+                    (count + child.node_count, height.max(1 + child.height))
+                }),
         };
+
+        Box::new(TrieNode {
+            kind,
+            reference,
+            node_count,
+            height,
+        })
     }
 
-    fn remove_at(entries: &mut HashMap<Vec<u8>, Vec<u8>>, key: &[u8]) -> Result<(), MerkleError> {
-        entries
-            .remove(key)
-            .map(|_| ())
-            .ok_or(MerkleError::UnsupportedOperation(
-                "remove missing Patricia key",
-            ))
+    fn leaf(path: Vec<u8>, value: Vec<u8>) -> Box<TrieNode<H::Digest>> {
+        Self::make(TrieNodeKind::Leaf { path, value })
     }
 
-    fn collapse(&mut self) {
-        self.rebuild();
+    fn empty_children() -> Children<H::Digest> {
+        std::array::from_fn(|_| None)
     }
 
-    fn key_for_leaf_index(index: LeafIndex) -> Vec<u8> {
-        let mut key = b"merkleforge:mpt:trait-leaf:".to_vec();
-        key.extend_from_slice(&(index.value() as u64).to_be_bytes());
-        key
+    /// Wraps `node` in an extension for `prefix`, unless `prefix` is empty.
+    fn with_prefix(prefix: &[u8], node: Box<TrieNode<H::Digest>>) -> Box<TrieNode<H::Digest>> {
+        if prefix.is_empty() {
+            node
+        } else {
+            Self::make(TrieNodeKind::Extension {
+                path: prefix.to_vec(),
+                child: node,
+            })
+        }
     }
 
-    fn build_subtree(
-        entries: &[(NibblePath, Vec<u8>)],
-        nodes: &mut HashMap<Vec<u8>, MptNode<H::Digest>>,
-    ) -> MptNode<H::Digest> {
-        match entries {
-            [] => MptNode::Empty,
-            [(path, value)] => MptNode::Leaf {
-                key_suffix: path.clone(),
-                value: value.clone(),
-            },
-            _ => {
-                let shared_prefix_len = Self::shared_prefix_len(entries);
-                if shared_prefix_len > 0 {
-                    let shared_prefix = entries[0].0.prefix(shared_prefix_len);
-                    let stripped = entries
-                        .iter()
-                        .map(|(path, value)| (path.slice(shared_prefix_len), value.clone()))
-                        .collect::<Vec<_>>();
-                    let child = Self::build_subtree(&stripped, nodes);
+    /// Puts `value` at `remaining` below a new branch: in the branch value
+    /// slot when `remaining` is empty, otherwise in a leaf child.
+    fn place(
+        children: &mut Children<H::Digest>,
+        branch_value: &mut Option<Vec<u8>>,
+        remaining: &[u8],
+        value: Vec<u8>,
+    ) {
+        match remaining.split_first() {
+            None => *branch_value = Some(value),
+            Some((nibble, rest)) => {
+                children[usize::from(*nibble)] = Some(Self::leaf(rest.to_vec(), value));
+            }
+        }
+    }
 
-                    let child = Self::store_node_ref(child, nodes);
+    fn insert_at(
+        node: Option<Box<TrieNode<H::Digest>>>,
+        path: &[u8],
+        value: Vec<u8>,
+    ) -> Box<TrieNode<H::Digest>> {
+        let Some(node) = node else {
+            return Self::leaf(path.to_vec(), value);
+        };
 
-                    return MptNode::Extension {
-                        shared_prefix,
-                        child,
-                    };
+        match node.kind {
+            TrieNodeKind::Leaf {
+                path: leaf_path,
+                value: leaf_value,
+            } => {
+                if leaf_path == path {
+                    return Self::leaf(leaf_path, value);
                 }
 
-                let mut children =
-                    Box::new(std::array::from_fn(|_| NodeRef::Inline(vec![EMPTY_RLP])));
+                let common = common_prefix_len(&leaf_path, path);
+                let mut children = Self::empty_children();
                 let mut branch_value = None;
-                for nibble in 0_u8..=0x0F {
-                    let child_entries = entries
-                        .iter()
-                        .filter_map(|(path, value)| {
-                            if path.is_empty() {
-                                return None;
-                            }
-                            (path.get(0) == nibble).then(|| (path.slice(1), value.clone()))
-                        })
-                        .collect::<Vec<_>>();
+                Self::place(
+                    &mut children,
+                    &mut branch_value,
+                    &leaf_path[common..],
+                    leaf_value,
+                );
+                Self::place(&mut children, &mut branch_value, &path[common..], value);
 
-                    if !child_entries.is_empty() {
-                        let child = Self::build_subtree(&child_entries, nodes);
-                        children[usize::from(nibble)] = Self::store_node_ref(child, nodes);
-                    }
-                }
-
-                for (path, value) in entries {
-                    if path.is_empty() {
-                        branch_value = Some(value.clone());
-                        break;
-                    }
-                }
-
-                MptNode::Branch {
+                let branch = Self::make(TrieNodeKind::Branch {
                     children,
                     value: branch_value,
-                }
+                });
+                Self::with_prefix(&path[..common], branch)
             }
-        }
-    }
-
-    fn shared_prefix_len(entries: &[(NibblePath, Vec<u8>)]) -> usize {
-        let Some((first, _)) = entries.first() else {
-            return 0;
-        };
-
-        entries
-            .iter()
-            .skip(1)
-            .fold(first.len(), |prefix_len, (path, _)| {
-                prefix_len.min(first.common_prefix_len(path))
-            })
-    }
-
-    fn store_node_ref(
-        node: MptNode<H::Digest>,
-        nodes: &mut HashMap<Vec<u8>, MptNode<H::Digest>>,
-    ) -> NodeRef<H::Digest> {
-        let node_ref = hash_node::<H>(&node);
-        nodes.insert(Self::node_ref_key(&node_ref), node);
-        node_ref
-    }
-
-    fn node_ref_key(node_ref: &NodeRef<H::Digest>) -> Vec<u8> {
-        match node_ref {
-            NodeRef::Hash(hash) => hash.as_ref().to_vec(),
-            NodeRef::Inline(rlp) => rlp.clone(),
-        }
-    }
-
-    fn resolve_node_ref(&self, node_ref: &NodeRef<H::Digest>) -> Option<&MptNode<H::Digest>> {
-        self.nodes.get(&Self::node_ref_key(node_ref))
-    }
-
-    fn collect_proof_nodes(
-        &self,
-        node: &MptNode<H::Digest>,
-        path: &NibblePath,
-        proof_nodes: &mut Vec<Vec<u8>>,
-    ) -> Option<Vec<u8>> {
-        proof_nodes.push(rlp_encode(node));
-
-        match node {
-            MptNode::Empty | MptNode::__DigestMarker(_) => None,
-            MptNode::Leaf { key_suffix, value } => (key_suffix == path).then(|| value.clone()),
-            MptNode::Extension {
-                shared_prefix,
+            TrieNodeKind::Extension {
+                path: ext_path,
                 child,
             } => {
-                if path.common_prefix_len(shared_prefix) == shared_prefix.len() {
-                    self.resolve_node_ref(child).and_then(|child| {
-                        self.collect_proof_nodes(
-                            child,
-                            &path.slice(shared_prefix.len()),
-                            proof_nodes,
-                        )
-                    })
-                } else {
-                    None
-                }
-            }
-            MptNode::Branch { children, value } => {
-                if path.is_empty() {
-                    return value.clone();
+                let common = common_prefix_len(&ext_path, path);
+                if common == ext_path.len() {
+                    let child = Self::insert_at(Some(child), &path[common..], value);
+                    return Self::make(TrieNodeKind::Extension {
+                        path: ext_path,
+                        child,
+                    });
                 }
 
-                let child_ref = &children[usize::from(path.get(0))];
-                self.resolve_node_ref(child_ref)
-                    .and_then(|child| self.collect_proof_nodes(child, &path.slice(1), proof_nodes))
+                let mut children = Self::empty_children();
+                let mut branch_value = None;
+                let rest = &ext_path[common + 1..];
+                children[usize::from(ext_path[common])] = Some(Self::with_prefix(rest, child));
+                Self::place(&mut children, &mut branch_value, &path[common..], value);
+
+                let branch = Self::make(TrieNodeKind::Branch {
+                    children,
+                    value: branch_value,
+                });
+                Self::with_prefix(&ext_path[..common], branch)
             }
+            TrieNodeKind::Branch {
+                mut children,
+                value: branch_value,
+            } => match path.split_first() {
+                None => Self::make(TrieNodeKind::Branch {
+                    children,
+                    value: Some(value),
+                }),
+                Some((nibble, rest)) => {
+                    let slot = usize::from(*nibble);
+                    children[slot] = Some(Self::insert_at(children[slot].take(), rest, value));
+                    Self::make(TrieNodeKind::Branch {
+                        children,
+                        value: branch_value,
+                    })
+                }
+            },
+        }
+    }
+
+    /// Removes the entry at `path`, which must exist below `node`.
+    fn remove_at(node: TrieNode<H::Digest>, path: &[u8]) -> Option<Box<TrieNode<H::Digest>>> {
+        match node.kind {
+            TrieNodeKind::Leaf { .. } => None,
+            TrieNodeKind::Extension {
+                path: ext_path,
+                child,
+            } => {
+                let child = Self::remove_at(*child, &path[ext_path.len()..])?;
+                Some(Self::merge_prefix(ext_path, child))
+            }
+            TrieNodeKind::Branch {
+                mut children,
+                mut value,
+            } => {
+                match path.split_first() {
+                    None => value = None,
+                    Some((nibble, rest)) => {
+                        let slot = usize::from(*nibble);
+                        let child = children[slot].take().expect("key path exists");
+                        children[slot] = Self::remove_at(*child, rest);
+                    }
+                }
+                Self::normalize_branch(children, value)
+            }
+        }
+    }
+
+    /// Prepends a non-empty `prefix` to `node`, merging it into a leaf or
+    /// extension so no extension ever points at another extension or a leaf.
+    fn merge_prefix(
+        mut prefix: Vec<u8>,
+        node: Box<TrieNode<H::Digest>>,
+    ) -> Box<TrieNode<H::Digest>> {
+        if matches!(node.kind, TrieNodeKind::Branch { .. }) {
+            return Self::make(TrieNodeKind::Extension {
+                path: prefix,
+                child: node,
+            });
+        }
+
+        match node.kind {
+            TrieNodeKind::Leaf { path, value } => {
+                prefix.extend_from_slice(&path);
+                Self::leaf(prefix, value)
+            }
+            TrieNodeKind::Extension { path, child } => {
+                prefix.extend_from_slice(&path);
+                Self::make(TrieNodeKind::Extension {
+                    path: prefix,
+                    child,
+                })
+            }
+            TrieNodeKind::Branch { .. } => unreachable!("branches are handled above"),
+        }
+    }
+
+    /// Rebuilds a branch after a removal, collapsing it when it no longer
+    /// has at least two occupied slots (children plus value).
+    fn normalize_branch(
+        mut children: Children<H::Digest>,
+        value: Option<Vec<u8>>,
+    ) -> Option<Box<TrieNode<H::Digest>>> {
+        let mut occupied = children
+            .iter()
+            .enumerate()
+            .filter(|(_, child)| child.is_some());
+        let first = occupied.next().map(|(slot, _)| slot);
+        let has_second = occupied.next().is_some();
+
+        match (first, has_second, value) {
+            (None, _, None) => None,
+            (None, _, Some(value)) => Some(Self::leaf(Vec::new(), value)),
+            (Some(slot), false, None) => {
+                let child = children[slot].take().expect("slot is occupied");
+                let nibble = u8::try_from(slot).expect("branch slots are nibbles");
+                Some(Self::merge_prefix(vec![nibble], child))
+            }
+            (_, _, value) => Some(Self::make(TrieNodeKind::Branch { children, value })),
         }
     }
 
@@ -657,9 +852,7 @@ where
         };
 
         match node {
-            MptNode::Empty | MptNode::__DigestMarker(_) => {
-                proof_value.is_none() && index + 1 == proof_nodes.len()
-            }
+            MptNode::Empty => proof_value.is_none() && index + 1 == proof_nodes.len(),
             MptNode::Leaf { key_suffix, value } => {
                 if key_suffix == *path {
                     proof_value == Some(&value) && index + 1 == proof_nodes.len()
@@ -718,114 +911,138 @@ where
         }
     }
 
-    fn get_at<'a>(
-        &'a self,
-        node: &'a MptNode<H::Digest>,
-        path: &NibblePath,
-    ) -> Option<&'a Vec<u8>> {
-        match node {
-            MptNode::Empty | MptNode::__DigestMarker(_) => None,
-            MptNode::Leaf { key_suffix, value } => (key_suffix == path).then_some(value),
-            MptNode::Extension {
-                shared_prefix,
-                child,
-            } => {
-                if path.common_prefix_len(shared_prefix) == shared_prefix.len() {
-                    let child = self.resolve_node_ref(child)?;
-                    self.get_at(child, &path.slice(shared_prefix.len()))
-                } else {
-                    None
-                }
-            }
-            MptNode::Branch { children, value } => {
-                if path.is_empty() {
-                    return value.as_ref();
-                }
-
-                let child_ref = &children[usize::from(path.get(0))];
-                let child = self.resolve_node_ref(child_ref)?;
-                self.get_at(child, &path.slice(1))
-            }
-        }
+    fn key_for_leaf_index(index: LeafIndex) -> Vec<u8> {
+        let mut key = b"merkleforge:mpt:trait-leaf:".to_vec();
+        key.extend_from_slice(&(index.value() as u64).to_be_bytes());
+        key
     }
 
-    fn count_nodes(
-        node: &MptNode<H::Digest>,
-        nodes: &HashMap<Vec<u8>, MptNode<H::Digest>>,
-    ) -> usize {
-        match node {
-            MptNode::Empty | MptNode::__DigestMarker(_) => 0,
-            MptNode::Leaf { .. } => 1,
-            MptNode::Extension { child, .. } => {
-                1 + nodes
-                    .get(&Self::node_ref_key(child))
-                    .map_or(0, |child| Self::count_nodes(child, nodes))
-            }
-            MptNode::Branch { children, .. } => {
-                1 + children
-                    .iter()
-                    .filter_map(|child_ref| nodes.get(&Self::node_ref_key(child_ref)))
-                    .map(|child| Self::count_nodes(child, nodes))
-                    .sum::<usize>()
-            }
+    /// Returns the key of an occupied trait-addressed entry.
+    fn existing_index_key(&self, index: LeafIndex) -> Result<Vec<u8>, MerkleError> {
+        if self.is_empty() {
+            return Err(MerkleError::EmptyTree);
         }
-    }
 
-    fn height_at(&self, node: &MptNode<H::Digest>) -> usize {
-        match node {
-            MptNode::Empty | MptNode::__DigestMarker(_) => 0,
-            MptNode::Leaf { .. } => 1,
-            MptNode::Extension { child, .. } => {
-                1 + self
-                    .resolve_node_ref(child)
-                    .map_or(0, |child| self.height_at(child))
-            }
-            MptNode::Branch { children, .. } => {
-                1 + children
-                    .iter()
-                    .filter_map(|child_ref| self.resolve_node_ref(child_ref))
-                    .map(|child| self.height_at(child))
-                    .max()
-                    .unwrap_or(0)
-            }
+        let key = Self::key_for_leaf_index(index);
+        if self.get(&key).is_some() {
+            Ok(key)
+        } else {
+            Err(MerkleError::IndexOutOfBounds {
+                index: index.value(),
+                len: self.len,
+            })
         }
     }
 }
 
-impl<H> Default for MerklePatriciaTrie<H>
-where
-    H: HashFunction,
-    H::Digest: From<[u8; 32]>,
-{
+fn common_prefix_len(left: &[u8], right: &[u8]) -> usize {
+    left.iter()
+        .zip(right)
+        .take_while(|(left, right)| left == right)
+        .count()
+}
+
+impl<H: HashFunction> Default for MerklePatriciaTrie<H> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<H> MerkleTree<H> for MerklePatriciaTrie<H>
-where
-    H: HashFunction,
-    H::Digest: From<[u8; 32]> + TryFrom<Vec<u8>>,
-{
-    fn insert(&mut self, data: &[u8]) -> Result<LeafIndex, MerkleError> {
-        let index = LeafIndex(self.leaf_count());
-        Self::insert(self, &Self::key_for_leaf_index(index), data)?;
+impl<H: HashFunction> Clone for MerklePatriciaTrie<H> {
+    fn clone(&self) -> Self {
+        Self {
+            root: self.root.clone(),
+            root_hash: self.root_hash.clone(),
+            len: self.len,
+            next_index_hint: self.next_index_hint,
+        }
+    }
+}
 
-        Ok(index)
+impl<H: HashFunction> fmt::Debug for MerklePatriciaTrie<H> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MerklePatriciaTrie")
+            .field("hash_algorithm", &H::algorithm_name())
+            .field("leaf_count", &self.len)
+            .field("node_count", &self.node_count())
+            .field("root", &self.root())
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct PatriciaTrieRepr {
+    hash_algorithm: String,
+    entries: Vec<(Vec<u8>, Vec<u8>)>,
+}
+
+/// Serializes the hash algorithm name and the `(key, value)` entries in key
+/// order.
+///
+/// Nodes are not serialized; deserialization re-inserts the entries, so a
+/// decoded trie is always canonical.
+impl<H: HashFunction> Serialize for MerklePatriciaTrie<H> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        PatriciaTrieRepr {
+            hash_algorithm: H::algorithm_name().to_string(),
+            entries: self.entries(),
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de, H: HashFunction> Deserialize<'de> for MerklePatriciaTrie<H> {
+    fn deserialize<De: Deserializer<'de>>(deserializer: De) -> Result<Self, De::Error> {
+        let repr = PatriciaTrieRepr::deserialize(deserializer)?;
+        if repr.hash_algorithm != H::algorithm_name() {
+            return Err(serde::de::Error::custom(format!(
+                "trie was built with {}, expected {}",
+                repr.hash_algorithm,
+                H::algorithm_name()
+            )));
+        }
+
+        let mut trie = Self::new();
+        for (key, value) in repr.entries {
+            if trie.get(&key).is_some() {
+                return Err(serde::de::Error::custom("duplicate Patricia key"));
+            }
+            trie.insert(&key, &value)
+                .map_err(serde::de::Error::custom)?;
+        }
+
+        Ok(trie)
+    }
+}
+
+/// Index-addressed adapter over the key-addressed trie.
+///
+/// Leaf index `i` is stored under the key
+/// `b"merkleforge:mpt:trait-leaf:" || i` (8 bytes, big-endian).
+/// [`MerkleTree::insert`] returns the first unoccupied index at or above the
+/// leaf count, so it never overwrites an existing entry, even after
+/// removals. Operations on an index with no entry return
+/// [`MerkleError::IndexOutOfBounds`].
+impl<H: HashFunction> MerkleTree<H> for MerklePatriciaTrie<H> {
+    fn insert(&mut self, data: &[u8]) -> Result<LeafIndex, MerkleError> {
+        let mut index = self.len.max(self.next_index_hint);
+        while self
+            .get(&Self::key_for_leaf_index(LeafIndex(index)))
+            .is_some()
+        {
+            index += 1;
+        }
+
+        Self::insert(self, &Self::key_for_leaf_index(LeafIndex(index)), data)?;
+        self.next_index_hint = index + 1;
+
+        Ok(LeafIndex(index))
     }
 
     fn remove(&mut self, index: LeafIndex) -> Result<(), MerkleError> {
-        if self.is_empty() {
-            return Err(MerkleError::EmptyTree);
-        }
-        if index.value() >= self.leaf_count() {
-            return Err(MerkleError::IndexOutOfBounds {
-                index: index.value(),
-                len: self.leaf_count(),
-            });
-        }
+        let key = self.existing_index_key(index)?;
 
-        Self::remove(self, &Self::key_for_leaf_index(index))
+        Self::remove(self, &key)
     }
 
     fn root(&self) -> Option<&H::Digest> {
@@ -845,15 +1062,7 @@ where
     }
 
     fn generate_proof(&self, index: LeafIndex) -> Result<MerkleProof<H::Digest>, MerkleError> {
-        if self.is_empty() {
-            return Err(MerkleError::EmptyTree);
-        }
-        if index.value() >= self.leaf_count() {
-            return Err(MerkleError::IndexOutOfBounds {
-                index: index.value(),
-                len: self.leaf_count(),
-            });
-        }
+        self.existing_index_key(index)?;
 
         Err(MerkleError::UnsupportedOperation(
             "Patricia trie proofs are key-addressed; use MerklePatriciaTrie::generate_proof",
@@ -862,9 +1071,9 @@ where
 
     fn metadata(&self) -> TreeMetadata {
         TreeMetadata {
-            leaf_count: self.leaf_count(),
+            leaf_count: self.len,
             height: self.height(),
-            node_count: self.node_count,
+            node_count: self.node_count(),
             hash_algorithm: H::algorithm_name(),
             variant: "MerklePatriciaTrie",
         }
@@ -979,21 +1188,8 @@ fn rlp_encode_node_ref<D: AsRef<[u8]>>(node_ref: &NodeRef<D>) -> Vec<u8> {
 fn hash_mpt_bytes<H>(bytes: &[u8]) -> H::Digest
 where
     H: HashFunction,
-    H::Digest: From<[u8; 32]>,
 {
-    if H::algorithm_name() == "Keccak-256" && H::digest_size() == 32 {
-        return raw_keccak256(bytes).into();
-    }
-
-    H::hash(bytes)
-}
-
-fn raw_keccak256(bytes: &[u8]) -> [u8; 32] {
-    let mut out = [0_u8; 32];
-    let mut hasher = Keccak::v256();
-    hasher.update(bytes);
-    hasher.finalize(&mut out);
-    out
+    H::hash_encoded_node(bytes)
 }
 
 fn usize_to_be_bytes(value: usize) -> Vec<u8> {
@@ -1683,5 +1879,154 @@ mod tests {
             tree.root().unwrap(),
             &decoded
         ));
+    }
+
+    struct XorShift(u64);
+
+    impl XorShift {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        /// Short keys over a tiny alphabet, so keys often share prefixes or
+        /// are prefixes of each other (including the empty key).
+        fn key(&mut self) -> Vec<u8> {
+            let len = (self.next() % 5) as usize;
+            (0..len).map(|_| (self.next() % 3) as u8 * 0x11).collect()
+        }
+    }
+
+    fn rebuilt_from_entries(trie: &MerklePatriciaTrie<Keccak256>) -> MerklePatriciaTrie<Keccak256> {
+        let mut entries = trie.entries();
+        entries.reverse();
+        let mut rebuilt = MerklePatriciaTrie::<Keccak256>::new();
+        for (key, value) in entries {
+            rebuilt.insert(&key, &value).unwrap();
+        }
+        rebuilt
+    }
+
+    #[test]
+    fn incremental_updates_stay_canonical() {
+        let mut rng = XorShift(0xBEEF);
+        let mut trie = MerklePatriciaTrie::<Keccak256>::new();
+        let mut keys = Vec::new();
+
+        for step in 0..500 {
+            if rng.next().is_multiple_of(3) && !keys.is_empty() {
+                let key: Vec<u8> = keys.swap_remove(rng.next() as usize % keys.len());
+                trie.remove(&key).unwrap();
+            } else {
+                let key = rng.key();
+                let value = rng.next().to_be_bytes();
+                trie.insert(&key, &value[..1 + (rng.next() % 8) as usize])
+                    .unwrap();
+                if !keys.contains(&key) {
+                    keys.push(key);
+                }
+            }
+
+            // Insertion order must not matter: a trie built from the same
+            // entries in a different order has the same shape and root.
+            let rebuilt = rebuilt_from_entries(&trie);
+            assert_eq!(trie.root(), rebuilt.root(), "root differs at step {step}");
+            assert_eq!(trie.node_count(), rebuilt.node_count(), "step {step}");
+            assert_eq!(trie.height(), rebuilt.height(), "step {step}");
+            assert_eq!(trie.leaf_count(), keys.len(), "step {step}");
+        }
+    }
+
+    #[test]
+    fn entries_are_returned_in_key_order() {
+        let mut trie = MerklePatriciaTrie::<Keccak256>::new();
+        for key in [b"dog".as_slice(), b"do", b"", b"doge", b"horse"] {
+            trie.insert(key, key.len().to_be_bytes().as_slice())
+                .unwrap();
+        }
+
+        let keys = trie
+            .entries()
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            keys,
+            vec![
+                b"".to_vec(),
+                b"do".to_vec(),
+                b"dog".to_vec(),
+                b"doge".to_vec(),
+                b"horse".to_vec()
+            ]
+        );
+    }
+
+    #[test]
+    fn trait_insert_after_remove_does_not_overwrite() {
+        let mut trie = MerklePatriciaTrie::<Keccak256>::new();
+        for data in [b"a", b"b", b"c"] {
+            MerkleTree::insert(&mut trie, data).unwrap();
+        }
+        MerkleTree::remove(&mut trie, LeafIndex(0)).unwrap();
+
+        let index = MerkleTree::insert(&mut trie, b"d").unwrap();
+
+        assert_eq!(index, LeafIndex(3));
+        assert_eq!(MerkleTree::leaf_count(&trie), 3);
+        let c_key = MerklePatriciaTrie::<Keccak256>::key_for_leaf_index(LeafIndex(2));
+        assert_eq!(trie.get(&c_key), Some(&b"c"[..]));
+        assert_eq!(
+            MerkleTree::remove(&mut trie, LeafIndex(0)),
+            Err(MerkleError::IndexOutOfBounds { index: 0, len: 3 })
+        );
+    }
+
+    #[test]
+    fn serialization_round_trips() {
+        let mut trie = MerklePatriciaTrie::<Keccak256>::new();
+        for (key, value) in [
+            (b"do".as_slice(), b"verb".as_slice()),
+            (b"dog", b"puppy"),
+            (b"", b"root"),
+        ] {
+            trie.insert(key, value).unwrap();
+        }
+
+        let bytes = trie.to_bytes().unwrap();
+        let decoded = MerklePatriciaTrie::<Keccak256>::from_bytes(&bytes).unwrap();
+
+        assert_eq!(decoded.root(), trie.root());
+        assert_eq!(decoded.entries(), trie.entries());
+        assert!(MerklePatriciaTrie::<Blake3>::from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn deserialization_rejects_duplicate_keys() {
+        let repr = (
+            "Keccak-256".to_string(),
+            vec![
+                (b"k".to_vec(), b"1".to_vec()),
+                (b"k".to_vec(), b"2".to_vec()),
+            ],
+        );
+        let bytes = repr.to_bytes().unwrap();
+
+        assert!(MerklePatriciaTrie::<Keccak256>::from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn clone_is_independent_and_debug_summarizes() {
+        let mut original = MerklePatriciaTrie::<Keccak256>::new();
+        original.insert(b"do", b"verb").unwrap();
+        let mut copy = original.clone();
+        copy.insert(b"dog", b"puppy").unwrap();
+
+        assert_eq!(original.leaf_count(), 1);
+        assert_ne!(original.root(), copy.root());
+        assert!(format!("{original:?}").contains("leaf_count: 1"));
     }
 }

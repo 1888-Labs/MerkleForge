@@ -107,7 +107,7 @@ proptest! {
         let proof = case_result(tree.generate_membership_proof(key))?;
         let root = required_root(&tree)?;
 
-        prop_assert!(SparseMerkleTree::<Sha256>::verify(&root, &value, &proof));
+        prop_assert!(SparseMerkleTree::<Sha256>::verify_membership(&root, key, &value, &proof));
     }
 
     #[test]
@@ -176,8 +176,8 @@ proptest! {
         let recovered = case_result(SparseMerkleProof::<[u8; 32]>::from_bytes(&bytes))?;
         let root = required_root(&tree)?;
 
-        let original_valid = SparseMerkleTree::<Sha256>::verify(&root, value, &proof);
-        let recovered_valid = SparseMerkleTree::<Sha256>::verify(&root, value, &recovered);
+        let original_valid = SparseMerkleTree::<Sha256>::verify_membership(&root, *key, value, &proof);
+        let recovered_valid = SparseMerkleTree::<Sha256>::verify_membership(&root, *key, value, &recovered);
 
         prop_assert_eq!(proof.siblings.len(), SPARSE_TREE_DEPTH);
         prop_assert!(original_valid);
