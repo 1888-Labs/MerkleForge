@@ -2,7 +2,7 @@ name: MerkleForge Website
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -19,7 +19,7 @@ env:
 
 jobs:
   benchmark:
-    name: Build website and Criterion reports
+    name: Build Vocs site and Criterion reports
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -38,17 +38,17 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: website/package-lock.json
+          cache-dependency-path: docs/package-lock.json
 
-      - name: Install website dependencies
+      - name: Install site dependencies
         run: npm ci
-        working-directory: website
+        working-directory: docs
 
       - name: Run binary-tree benchmarks
         run: cargo bench --bench binary_tree
 
       - name: Prepare Pages site
-        run: python3 website/build.py --minimum-samples 36
+        run: python3 scripts/build_site.py --minimum-samples 36
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
