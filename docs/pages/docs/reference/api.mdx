@@ -14,8 +14,8 @@ This page maps the public API of each crate. For full signatures and doc comment
 | `merkle-variants` | `merkle_variants` | [docs.rs/merkle-variants](https://docs.rs/merkle-variants) |
 
 :::note
-docs.rs shows the latest **published** release (0.4.1). Items marked *Unreleased* below are in the
-repository but not yet on crates.io.
+docs.rs documents the latest release (v0.5.0). Items marked *v0.5.0* below were added in that
+release.
 :::
 
 ## merkle-core
@@ -43,7 +43,7 @@ fn main() {
 
 | Trait | Methods |
 | --- | --- |
-| [`HashFunction`](https://docs.rs/merkle-core/latest/merkle_core/traits/hash_function/trait.HashFunction.html) | `type Digest`; `hash`, `algorithm_name`, `digest_size`; provided `hash_nodes`, `hash_encoded_node` (*Unreleased*), `empty` |
+| [`HashFunction`](https://docs.rs/merkle-core/latest/merkle_core/traits/hash_function/trait.HashFunction.html) | `type Digest`; `hash`, `algorithm_name`, `digest_size`; provided `hash_nodes`, `hash_encoded_node` (*v0.5.0*), `empty` |
 | [`MerkleTree<H>`](https://docs.rs/merkle-core/latest/merkle_core/traits/merkle_tree/trait.MerkleTree.html) | `insert`, `remove`, `root`, `leaf_count`, `is_empty`, `height`, `generate_proof`, `metadata` |
 | [`ProofVerifier<H>`](https://docs.rs/merkle-core/latest/merkle_core/traits/merkle_tree/trait.ProofVerifier.html) | `verify(expected_root, leaf_data, proof) -> bool` |
 | [`Serializable`](https://docs.rs/merkle-core/latest/merkle_core/traits/serializable/trait.Serializable.html) | `to_bytes`, `from_bytes`, `serialized_size`; blanket impl for `Serialize + DeserializeOwned` |
@@ -83,7 +83,7 @@ Top-level re-exports: `BinaryMerkleTree`, `SparseMerkleTree`, `MerklePatriciaTri
 | Method | Notes |
 | --- | --- |
 | `new()`, `with_capacity(n)`, `Default` | Empty tree |
-| `from_leaves(iter)` | One-pass `O(n)` build (*Unreleased*) |
+| `from_leaves(iter)` | One-pass `O(n)` build (*v0.5.0*) |
 | `insert(&[u8]) -> Result<LeafIndex>` | Append a leaf |
 | `remove(LeafIndex)` | Replace with `H::empty()` |
 | `root()`, `leaf_count()`, `is_empty()`, `height()` | Queries |
@@ -91,7 +91,7 @@ Top-level re-exports: `BinaryMerkleTree`, `SparseMerkleTree`, `MerklePatriciaTri
 | `verify(root, leaf, &proof) -> bool` | Stateless, associated function |
 
 Implements `MerkleTree<H>`, `ProofVerifier<H>`; `Clone`, `Debug`, `Serialize`, `Deserialize`
-(*Unreleased*). Guide: [Binary Merkle tree](/docs/guides/binary-merkle-tree).
+(*v0.5.0*). Guide: [Binary Merkle tree](/docs/guides/binary-merkle-tree).
 
 ### `sparse` — [`SparseMerkleTree<H>`](https://docs.rs/merkle-variants/latest/merkle_variants/sparse/struct.SparseMerkleTree.html)
 
@@ -102,7 +102,7 @@ Implements `MerkleTree<H>`, `ProofVerifier<H>`; `Clone`, `Debug`, `Serialize`, `
 | `remove(key)`, `batch_remove(&[key])` | Remove existing keys |
 | `get(key) -> Option<&Digest>` | Stored leaf hash |
 | `generate_membership_proof(key) -> Result<SparseMerkleProof>` | Membership or non-membership |
-| `verify_membership(root, key, leaf, &proof)` | Checks key, value, path (*Unreleased*) |
+| `verify_membership(root, key, leaf, &proof)` | Checks key, value, path (*v0.5.0*) |
 | `verify_non_membership(root, key, &proof)` | Absence proof |
 | `verify(root, leaf, &proof)` | **Deprecated**: doesn't check the key |
 | `root()`, `empty_root()`, `leaf_count()`, `is_empty()`, `height()`, `depth()` | Queries |
@@ -110,7 +110,7 @@ Implements `MerkleTree<H>`, `ProofVerifier<H>`; `Clone`, `Debug`, `Serialize`, `
 | `stored_node_count()`, `last_node_access_count()`, `unbatched_node_count_estimate()` | Storage introspection |
 
 Also: `SparseMerkleProof<D>` (`key`, `siblings`, `leaf`; `is_membership()`,
-`is_non_membership()`), `NodeEntry<D>` (with `commitment()`, *Unreleased*), `SubtreeBatch<D>`,
+`is_non_membership()`), `NodeEntry<D>` (with `commitment()`, *v0.5.0*), `SubtreeBatch<D>`,
 `bit_at`, and the constants `SPARSE_TREE_DEPTH`, `EMPTY_HASH_LEVELS`, `BATCH_DEPTH`. Guide:
 [Sparse Merkle tree](/docs/guides/sparse-merkle-tree).
 

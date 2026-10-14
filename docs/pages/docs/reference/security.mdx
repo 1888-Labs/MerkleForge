@@ -61,6 +61,6 @@ The canonical policy is
 - **Check the key** on sparse proofs with `verify_membership`. The deprecated
   `SparseMerkleTree::verify` accepts a valid proof for *any* key holding the value.
 - **Canonical leaf encoding.** Prover and verifier must hash exactly the same bytes.
-- **Custom hash adapters** must keep leaf and node domains separate. Since *Unreleased*, the default
+- **Custom hash adapters** must keep leaf and node domains separate. Since v0.5.0, the default
   `hash_nodes` applies the `0x01` prefix for you. See
   [Hash functions](/docs/guides/hash-functions#writing-a-custom-adapter).

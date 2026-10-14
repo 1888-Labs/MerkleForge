@@ -178,7 +178,7 @@ Checklist for a custom adapter:
 4. **Use a unique `algorithm_name`.** Serialized trees store it to reject mismatched hashes.
 
 :::warning
-Since **Unreleased**, the default `hash_nodes` hashes `0x01 ‖ left ‖ right` instead of
+Since v0.5.0, the default `hash_nodes` hashes `0x01 ‖ left ‖ right` instead of
 `left ‖ right`. Custom adapters that relied on the old default now produce different roots.
 The shipped adapters override `hash_nodes` and are unaffected.
 :::

@@ -163,7 +163,7 @@ Rules:
 - Single `remove` of a missing key also returns `UnsupportedOperation`.
 
 In the published benchmark run (2026-08-17), a 1,000-key batch insert took 20.33 ms versus 8.69 s
-for 1,000 sequential inserts. That run predates the **Unreleased** fix that makes single inserts
+for 1,000 sequential inserts. That run predates the v0.5.0 fix that makes single inserts
 recompute only the changed path, so today's sequential numbers are far lower; batching still saves
 work on shared ancestors. See [Benchmarks](/docs/performance/benchmarks).
 

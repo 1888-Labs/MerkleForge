@@ -78,7 +78,7 @@ for flamegraphs and `perf`.
 ## Releases (maintainers)
 
 Releases run through the manual workflow in `.github/workflows/release.yml`.
-Trigger it with a semantic version such as `0.4.1`. It tests the workspace,
+Trigger it with a semantic version such as `0.5.1`. It tests the workspace,
 bumps the version and changelog, tags the release, publishes the crates,
 creates the GitHub release, and sends the Telegram notification. For local
 release tooling, run `make install-release-tools`.
