@@ -13,6 +13,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+No unreleased changes yet.
+
+---
+
+## [0.5.0] — 2026-10-14
+
 Correctness and performance fixes for the tree variants. Roots and proofs for
 the shipped hash adapters are unchanged; a randomized snapshot of roots, node
 counts, heights, and serialized proofs for all three variants matched
@@ -362,7 +368,8 @@ pipeline.
 
 ---
 
-[Unreleased]: https://github.com/1888-Labs/MerkleForge/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/1888-Labs/MerkleForge/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/1888-Labs/MerkleForge/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/1888-Labs/MerkleForge/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/1888-Labs/MerkleForge/compare/v0.2.0...v0.4.0
 [0.2.0]: https://github.com/1888-Labs/MerkleForge/compare/v0.1.1...v0.2.0
