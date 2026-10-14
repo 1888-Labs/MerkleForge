@@ -11,7 +11,10 @@
 #   3. no-std  — verifies merkle-core on a bare-metal target
 #   4. bench-dry — ensures benchmarks compile (no regression)
 #   5. docs     — rustdoc build check
-#   6. bench-publish — publishes Criterion HTML reports from main
+#   6. site     — builds the Vocs website in docs/
+#   7. scripts  — unit tests for the Python scripts in .github/scripts
+#
+# All Rust jobs use the toolchain pinned in rust-toolchain.toml.
 
 name: CI
 
@@ -32,26 +35,16 @@ jobs:
   test:
     name: Test Suite
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust: [stable, beta]   # catch breakage early on beta channel
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust ${{ matrix.rust }}
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.rust }}
-          components: rustfmt, clippy
+          toolchain: "1.97.1"
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Build (all workspace members)
         run: cargo build --workspace --all-features
@@ -109,10 +102,15 @@ jobs:
     name: Benchmarks compile check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Compile benchmarks (no run)
         run: cargo bench --workspace --no-run
@@ -121,24 +119,6 @@ jobs:
   docs:
     name: Rustdoc
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build docs (deny broken intra-doc links)
-        run: >
-          RUSTDOCFLAGS="-D warnings"
-          cargo doc --workspace --all-features --no-deps
-
-  # ── 6. Benchmark report publishing ──────────────────────────────────────
-  bench-publish:
-    name: Publish benchmark reports
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v6
 
@@ -150,38 +130,39 @@ jobs:
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Run all Criterion benchmarks
-        run: cargo bench --workspace
+      - name: Build docs (deny broken intra-doc links)
+        run: >
+          RUSTDOCFLAGS="-D warnings"
+          cargo doc --workspace --all-features --no-deps
 
-      - name: Stage Criterion reports
-        run: |
-          set -euo pipefail
-          mkdir -p benchmark-pages/criterion
-          cp -R target/criterion/. benchmark-pages/criterion/
+  # ── 6. Website build ────────────────────────────────────────────────────
+  site:
+    name: Website build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
 
-          python3 - <<'PY'
-          from pathlib import Path
-
-          index = Path("benchmark-pages/index.html")
-          index.write_text("""<!doctype html>
-          <html lang="en">
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1">
-              <meta http-equiv="refresh" content="0; url=criterion/report/index.html">
-              <title>MerkleForge Benchmarks</title>
-            </head>
-            <body>
-              <p>Redirecting to the latest MerkleForge Criterion report...</p>
-              <p><a href="criterion/report/index.html">Open benchmark report</a></p>
-            </body>
-          </html>
-          """)
-          PY
-
-      - name: Publish reports to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: gh-pages
-          publish_dir: benchmark-pages
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install site dependencies
+        run: npm ci
+        working-directory: docs
+
+      - name: Build Vocs site
+        run: npm run build
+        working-directory: docs
+
+  # ── 7. Script tests ─────────────────────────────────────────────────────
+  scripts:
+    name: Script tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run Python unit tests
+        run: python3 -m unittest discover -s tests -v
