@@ -10,7 +10,8 @@ permissions:
 
 concurrency:
   group: merkleforge-website
-  cancel-in-progress: true
+  # Never cancel a run mid-deploy; queue the newer run behind it instead.
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always

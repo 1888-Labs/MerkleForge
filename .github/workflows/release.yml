@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: write   # dispatch the website rebuild after the bump commit
 
 env:
   CARGO_TERM_COLOR: always
@@ -113,6 +114,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_VERSION: ${{ inputs.version }}
         run: gh release create "v${RELEASE_VERSION}" --title "v${RELEASE_VERSION}" --notes-file /tmp/release_body.md
+
+      # Pushes made with GITHUB_TOKEN don't trigger workflows, so the website
+      # would keep showing the previous version without an explicit rebuild.
+      - name: Rebuild website with the new version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run website.yml --ref "${GITHUB_REF_NAME}"
 
       - name: Build Telegram release notification
         env:
