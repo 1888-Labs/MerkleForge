@@ -95,8 +95,8 @@ def update_changelog(path: Path, version: str, release_date: str, body_path: Pat
     if not unreleased_body:
         unreleased_body = EMPTY_UNRELEASED
 
-    release_heading = f"## [v{version}] — {release_date}"
-    release_entry = f"{release_heading}\n\n{unreleased_body}\n"
+    release_heading = f"## [{version}] — {release_date}"
+    release_entry = f"\n{release_heading}\n\n{unreleased_body}\n"
     new_unreleased = f"{UNRELEASED_HEADING}\n\n{EMPTY_UNRELEASED}\n"
     updated = text[:heading_index] + new_unreleased + SECTION_BREAK + release_entry + text[next_break:]
     updated = update_changelog_links(updated, version, previous_version)
@@ -114,10 +114,10 @@ def update_changelog_links(text: str, version: str, previous_version: str | None
     base = link_match.group("base")
     previous = previous_version or link_match.group("previous")
     unreleased = f"[Unreleased]: {base}/v{version}...HEAD"
-    release_link = f"[v{version}]: {base}/v{previous}...v{version}"
+    release_link = f"[{version}]: {base}/v{previous}...v{version}"
 
     updated = UNRELEASED_LINK_RE.sub(unreleased, text, count=1)
-    if f"[v{version}]:" in updated:
+    if f"[{version}]:" in updated:
         return updated
 
     return updated.replace(unreleased, f"{unreleased}\n{release_link}", 1)

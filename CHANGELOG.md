@@ -81,13 +81,30 @@ byte-for-byte before and after.
   licenses, and benchmark links resolve on crates.io.
 - Added `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1) and linked it from the
   README and `CONTRIBUTING.md`.
-- The website now uses the Forged block mark, brand wordmark styling, and the
-  brand favicon set and web manifest.
-- Removed the local `AGENTS.md` agent guidance file.
+- Replaced the React website with a [Vocs](https://vocs.dev) documentation
+  site in `docs/`: getting started, a guide per tree variant, hash functions,
+  proofs, serialization, errors, `no_std`, performance, and API reference,
+  plus the examples, light-client demo, and benchmark explorer. It uses the
+  Forged block mark and brand favicon set. `scripts/build_site.py` builds it
+  together with the Criterion reports for GitHub Pages.
+- Shortened the root README and moved architecture details to
+  `ARCHITECTURE.md` (with a "where to make a change" table for contributors)
+  and research citations to `REFERENCES.md`.
+- Updated `AGENTS.md` for the new docs site.
+- The repository moved to [1888-Labs/MerkleForge](https://github.com/1888-Labs/MerkleForge).
 - `MerkleProof::leaf_count` now documents that the root does not commit to
   it, so verifiers must not trust it without an independent source.
 - `HashFunction` docs and the `merkle-core` README describe the required
   `0x00` / `0x01` domain-separation convention.
+
+### CI
+
+- CI builds the docs site and runs the Python script tests on every pull
+  request, and all Rust jobs use the pinned 1.97.1 toolchain.
+- The website deploys from `main` only. The redundant `gh-pages` benchmark
+  publish job is removed; the site already includes the Criterion reports.
+- The release script also bumps the pinned internal crate versions in
+  `Cargo.toml` and the install snippets in the docs.
 
 ---
 
