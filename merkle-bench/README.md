@@ -1,6 +1,15 @@
-# merkle-bench
+<p align="center">
+  <a href="https://github.com/1888-Labs/MerkleForge">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/brand/svg/mark/merkleforge-mark-white.svg">
+      <img alt="MerkleForge" src="../assets/brand/svg/mark/merkleforge-mark-black.svg" width="72">
+    </picture>
+  </a>
+</p>
 
-> Criterion benchmark suite for MerkleForge Framework.
+<h1 align="center">merkle-bench</h1>
+
+<p align="center">Criterion benchmark suite for MerkleForge. Internal workspace crate, not published.</p>
 
 `merkle-bench` is an internal workspace crate used for measurement only. It is
 not published to crates.io. Keeping benchmarks isolated allows the project to
@@ -39,7 +48,7 @@ Criterion writes HTML reports to:
 target/criterion/
 ```
 
-The website build copies those reports into the deployed GitHub Pages artifact
+The site build (`scripts/build_site.py`) copies those reports into the deployed GitHub Pages artifact
 so the public dashboard can link to the raw Criterion output.
 
 ## Comparative Proof Sizes

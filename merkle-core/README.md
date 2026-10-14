@@ -1,11 +1,21 @@
-# merkle-core
+<p align="center">
+  <a href="https://github.com/1888-Labs/MerkleForge">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/1888-Labs/MerkleForge/main/assets/brand/svg/mark/merkleforge-mark-white.svg">
+      <img alt="MerkleForge" src="https://raw.githubusercontent.com/1888-Labs/MerkleForge/main/assets/brand/svg/mark/merkleforge-mark-black.svg" width="72">
+    </picture>
+  </a>
+</p>
 
-> Shared traits, proof types, metadata, serialization helpers, and error types
-> for the MerkleForge Framework workspace.
+<h1 align="center">merkle-core</h1>
 
-[![Crates.io](https://img.shields.io/crates/v/merkle-core.svg)](https://crates.io/crates/merkle-core)
-[![docs.rs](https://docs.rs/merkle-core/badge.svg)](https://docs.rs/merkle-core)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+<p align="center">Shared traits, proof types, serialization helpers, and errors<br>for the MerkleForge authenticated data structure framework.</p>
+
+<p align="center">
+  <a href="https://crates.io/crates/merkle-core"><img alt="crates.io" src="https://img.shields.io/crates/v/merkle-core.svg?style=flat-square&label=crates.io&color=000000"></a>
+  <a href="https://docs.rs/merkle-core"><img alt="docs.rs" src="https://img.shields.io/docsrs/merkle-core?style=flat-square&label=docs.rs&color=000000"></a>
+  <a href="#license"><img alt="license" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-000000?style=flat-square"></a>
+</p>
 
 `merkle-core` is the small foundation crate behind MerkleForge Framework. It
 contains no concrete tree implementation. Instead, it defines the contracts
@@ -109,14 +119,22 @@ pub trait HashFunction {
     fn algorithm_name() -> &'static str;
     fn digest_size() -> usize;
 
+    // Provided methods
     fn hash_nodes(left: &Self::Digest, right: &Self::Digest) -> Self::Digest;
+    fn hash_encoded_node(encoded: &[u8]) -> Self::Digest;
     fn empty() -> Self::Digest;
 }
 ```
 
-Implementations should domain-separate leaf hashing from internal-node hashing.
-The adapters in `merkleforge-hash` use separate leaf and node domains so proofs
-cannot confuse raw leaf data with encoded internal nodes.
+Implementations must domain-separate leaf hashing from internal-node hashing:
+`hash(data)` should hash `0x00 || data`. The default `hash_nodes` hashes
+`0x01 || left || right`, and the adapters in `merkleforge-hash` use separate
+leaf and node domains, so proofs cannot confuse raw leaf data with encoded
+internal nodes.
+
+`hash_encoded_node` hashes self-describing encodings such as RLP Patricia
+nodes. It defaults to `hash`; the Keccak-256 adapter returns plain Keccak-256
+so Patricia roots match Ethereum.
 
 ### `MerkleTree`
 
@@ -207,8 +225,16 @@ match arm for forward compatibility.
 - Tree implementations: [`merkle-variants`](https://crates.io/crates/merkle-variants)
 - Hash adapters: [`merkleforge-hash`](https://crates.io/crates/merkleforge-hash)
 - API docs: <https://docs.rs/merkle-core>
-- Repository: <https://github.com/dicethedev/MerkleForge>
-- Website: <https://dicethedev.github.io/MerkleForge/>
+- Repository: <https://github.com/1888-Labs/MerkleForge>
+- Website: <https://1888-labs.github.io/MerkleForge/>
+
+## Part of MerkleForge
+
+| Crate | Role |
+| --- | --- |
+| [`merkle-core`](https://crates.io/crates/merkle-core) | Shared traits, proof types, serialization, and errors |
+| [`merkleforge-hash`](https://crates.io/crates/merkleforge-hash) | SHA-256, Keccak-256, and BLAKE3 adapters |
+| [`merkle-variants`](https://crates.io/crates/merkle-variants) | Binary, Sparse, and Patricia tree implementations |
 
 ## Safety
 
@@ -223,7 +249,7 @@ security-critical environments.
 
 Licensed under either of:
 
-- [MIT License](../LICENSE)
-- [Apache License, Version 2.0](../LICENSE-APACHE)
+- [MIT License](https://github.com/1888-Labs/MerkleForge/blob/main/LICENSE)
+- [Apache License, Version 2.0](https://github.com/1888-Labs/MerkleForge/blob/main/LICENSE-APACHE)
 
 at your option.
