@@ -2,8 +2,8 @@
 """Prepare a MerkleForge workspace release.
 
 This script updates the workspace version in ``Cargo.toml``, the pinned
-MerkleForge dependency versions in ``Cargo.toml`` and the docs install
-snippets, promotes the
+MerkleForge dependency versions in ``Cargo.toml``, the crate READMEs, and the
+docs install snippets, promotes the
 ``[Unreleased]`` changelog section to the requested version, and writes the
 promoted changelog entry to a release body file for GitHub Releases.
 """
@@ -28,7 +28,7 @@ DEPENDENCY_VERSION_RE = re.compile(
     r'(?m)^(?P<prefix>(?:merkle-core|merkleforge-hash|merkle-variants)\s*=\s*'
     r'(?:\{[^}\n]*?\bversion\s*=\s*)?")\d+\.\d+\.\d+(?=")'
 )
-DOCS_BADGE_RE = re.compile(r"(<span>version</span><span>)\d+\.\d+\.\d+(</span>)")
+DOCS_BADGE_RE = re.compile(r"(<span>version</span><span>v?)\d+\.\d+\.\d+(</span>)")
 DOCS_PAGES_DIR = Path("docs/pages")
 UNRELEASED_HEADING = "## [Unreleased]"
 SECTION_BREAK = "\n---\n"
@@ -128,7 +128,10 @@ def main() -> None:
     args = parse_args()
     validate_version(args.version)
     update_workspace_version(Path("Cargo.toml"), args.version)
-    update_dependency_versions([Path("Cargo.toml"), *sorted(DOCS_PAGES_DIR.rglob("*.mdx"))], args.version)
+    update_dependency_versions(
+        [Path("Cargo.toml"), *sorted(Path().glob("merkle-*/README.md")), *sorted(DOCS_PAGES_DIR.rglob("*.mdx"))],
+        args.version,
+    )
     update_changelog(Path("CHANGELOG.md"), args.version, args.date, Path(args.release_body))
 
 

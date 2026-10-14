@@ -25,6 +25,7 @@ class UpdateDependencyVersionsTests(unittest.TestCase):
             'merkle-core = { version = "0.4.1", default-features = false, features = ["alloc"] }\n'
             'merkleforge-hash = { path = "merkle-hash", version = "0.4.1" }\n'
             '<div className="mf-badge"><span>version</span><span>0.4.1</span></div>\n'
+            '<div className="mf-badge"><span>version</span><span>v0.4.1</span></div>\n'
         )
         self.assertEqual(self.bump(text), text.replace("0.4.1", "0.5.0"))
 
