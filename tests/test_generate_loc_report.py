@@ -12,7 +12,7 @@ class GenerateLocReportTests(unittest.TestCase):
     def test_crate_name_for_path_uses_workspace_crate(self) -> None:
         self.assertEqual(generate_loc_report.crate_name_for_path("./merkle-core/src/lib.rs"), "merkle-core")
         self.assertEqual(generate_loc_report.crate_name_for_path("./merkle-variants/tests/binary.rs"), "merkle-variants")
-        self.assertEqual(generate_loc_report.crate_name_for_path("./website/src/index.html"), "website")
+        self.assertEqual(generate_loc_report.crate_name_for_path("./docs/pages/index.mdx"), "docs")
 
     def test_weekly_summary_contains_expected_sections(self) -> None:
         summary = generate_loc_report.build_weekly_summary(

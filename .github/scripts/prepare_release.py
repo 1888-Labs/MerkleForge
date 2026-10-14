@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Prepare a MerkleForge workspace release.
 
-This script updates the workspace version in ``Cargo.toml``, promotes the
+This script updates the workspace version in ``Cargo.toml``, the pinned
+MerkleForge dependency versions in ``Cargo.toml`` and the docs install
+snippets, promotes the
 ``[Unreleased]`` changelog section to the requested version, and writes the
 promoted changelog entry to a release body file for GitHub Releases.
 """
@@ -20,6 +22,14 @@ CHANGELOG_VERSION_RE = re.compile(r"(?m)^## \[(?:v)?(?P<version>\d+\.\d+\.\d+)\]
 UNRELEASED_LINK_RE = re.compile(
     r"(?m)^\[Unreleased\]: (?P<base>.+/compare)/v(?P<previous>[^.\s]+\.[^.\s]+\.[^.\s]+)\.\.\.HEAD$"
 )
+# `merkle-core = "0.4.1"`, `merkle-core = { version = "0.4.1", ... }`,
+# and `merkle-core = { path = "merkle-core", version = "0.4.1" }`.
+DEPENDENCY_VERSION_RE = re.compile(
+    r'(?m)^(?P<prefix>(?:merkle-core|merkleforge-hash|merkle-variants)\s*=\s*'
+    r'(?:\{[^}\n]*?\bversion\s*=\s*)?")\d+\.\d+\.\d+(?=")'
+)
+DOCS_BADGE_RE = re.compile(r"(<span>version</span><span>)\d+\.\d+\.\d+(</span>)")
+DOCS_PAGES_DIR = Path("docs/pages")
 UNRELEASED_HEADING = "## [Unreleased]"
 SECTION_BREAK = "\n---\n"
 EMPTY_UNRELEASED = "No unreleased changes yet."
@@ -57,6 +67,16 @@ def update_workspace_version(path: Path, version: str) -> None:
     path.write_text(updated)
 
 
+def update_dependency_versions(paths: list[Path], version: str) -> None:
+    """Point pinned MerkleForge dependencies and the docs version badge at the new release."""
+    for path in paths:
+        text = path.read_text()
+        updated = DEPENDENCY_VERSION_RE.sub(rf"\g<prefix>{version}", text)
+        updated = DOCS_BADGE_RE.sub(rf"\g<1>{version}\g<2>", updated)
+        if updated != text:
+            path.write_text(updated)
+
+
 def update_changelog(path: Path, version: str, release_date: str, body_path: Path) -> None:
     """Promote the Unreleased section and write the release body."""
     text = path.read_text()
@@ -75,8 +95,8 @@ def update_changelog(path: Path, version: str, release_date: str, body_path: Pat
     if not unreleased_body:
         unreleased_body = EMPTY_UNRELEASED
 
-    release_heading = f"## [v{version}] — {release_date}"
-    release_entry = f"{release_heading}\n\n{unreleased_body}\n"
+    release_heading = f"## [{version}] — {release_date}"
+    release_entry = f"\n{release_heading}\n\n{unreleased_body}\n"
     new_unreleased = f"{UNRELEASED_HEADING}\n\n{EMPTY_UNRELEASED}\n"
     updated = text[:heading_index] + new_unreleased + SECTION_BREAK + release_entry + text[next_break:]
     updated = update_changelog_links(updated, version, previous_version)
@@ -94,10 +114,10 @@ def update_changelog_links(text: str, version: str, previous_version: str | None
     base = link_match.group("base")
     previous = previous_version or link_match.group("previous")
     unreleased = f"[Unreleased]: {base}/v{version}...HEAD"
-    release_link = f"[v{version}]: {base}/v{previous}...v{version}"
+    release_link = f"[{version}]: {base}/v{previous}...v{version}"
 
     updated = UNRELEASED_LINK_RE.sub(unreleased, text, count=1)
-    if f"[v{version}]:" in updated:
+    if f"[{version}]:" in updated:
         return updated
 
     return updated.replace(unreleased, f"{unreleased}\n{release_link}", 1)
@@ -108,6 +128,7 @@ def main() -> None:
     args = parse_args()
     validate_version(args.version)
     update_workspace_version(Path("Cargo.toml"), args.version)
+    update_dependency_versions([Path("Cargo.toml"), *sorted(DOCS_PAGES_DIR.rglob("*.mdx"))], args.version)
     update_changelog(Path("CHANGELOG.md"), args.version, args.date, Path(args.release_body))
 
 

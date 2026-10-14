@@ -1,4 +1,4 @@
-.PHONY: fmt lint test install-release-tools install-profiling-tools
+.PHONY: fmt lint test docs site install-release-tools install-profiling-tools
 
 fmt:
 	cargo fmt --all
@@ -18,3 +18,9 @@ install-release-tools:
 
 install-profiling-tools:
 	cargo install flamegraph --locked
+
+docs:
+	npm --prefix docs run dev
+
+site:
+	python3 scripts/build_site.py

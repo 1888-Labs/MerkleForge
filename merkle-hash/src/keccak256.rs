@@ -62,6 +62,20 @@ impl HashFunction for Keccak256 {
         out
     }
 
+    /// Plain `Keccak-256(encoded)` with no domain prefix.
+    ///
+    /// Ethereum hashes RLP-encoded Patricia nodes without a prefix, so this
+    /// keeps `MerklePatriciaTrie<Keccak256>` roots Ethereum-compatible. RLP
+    /// already distinguishes node types, so no extra separator is needed.
+    #[inline]
+    fn hash_encoded_node(encoded: &[u8]) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        let mut h = Self::new_hasher();
+        h.update(encoded);
+        h.finalize(&mut out);
+        out
+    }
+
     fn algorithm_name() -> &'static str {
         "Keccak-256"
     }
@@ -93,6 +107,17 @@ mod tests {
             0x5d, 0x85, 0xa4, 0x70,
         ];
         assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn hash_encoded_node_is_plain_keccak() {
+        // Keccak-256(0x80): the root of an empty Ethereum trie.
+        let expected = [
+            0x56, 0xe8, 0x1f, 0x17, 0x1b, 0xcc, 0x55, 0xa6, 0xff, 0x83, 0x45, 0xe6, 0x92, 0xc0,
+            0xf8, 0x6e, 0x5b, 0x48, 0xe0, 0x1b, 0x99, 0x6c, 0xad, 0xc0, 0x01, 0x62, 0x2f, 0xb5,
+            0xe3, 0x63, 0xb4, 0x21,
+        ];
+        assert_eq!(Keccak256::hash_encoded_node(&[0x80]), expected);
     }
 
     #[test]

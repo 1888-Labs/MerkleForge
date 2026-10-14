@@ -68,7 +68,7 @@ def crate_name_for_path(path: str) -> str:
     parts = [part for part in normalized.split("/") if part and part != "."]
     if not parts:
         return "unknown"
-    if parts[0] in {"merkle-bench", "merkle-core", "merkle-hash", "merkle-variants", "website"}:
+    if parts[0] in {"merkle-bench", "merkle-core", "merkle-hash", "merkle-variants", "docs"}:
         return parts[0]
     if parts[0] in {"src", "tests", "benches", "examples", "bin", "crates"} and len(parts) > 1:
         return parts[1]

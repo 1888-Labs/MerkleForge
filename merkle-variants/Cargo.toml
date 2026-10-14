@@ -15,7 +15,6 @@ keywords.workspace   = true
 [dependencies]
 merkle-core = { workspace = true }
 serde       = { workspace = true }
-tiny-keccak = { workspace = true }
 
 [dev-dependencies]
 merkleforge-hash = { workspace = true }

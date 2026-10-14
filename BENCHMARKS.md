@@ -15,7 +15,7 @@ numbers should be recorded from the same machine and Rust toolchain.
 - Rust: rustc 1.97.1 (8bab26f4f 2026-07-14)
 - Date: 2026-08-17
 - Criterion output: `target/criterion/`
-- Live report URL: <https://dicethedev.github.io/MerkleForge/>
+- Live report URL: <https://1888-labs.github.io/MerkleForge/>
 
 Run note: the local `cargo bench --workspace` refresh was started on
 2026-08-17 and completed through baseline hashing, energy construction,

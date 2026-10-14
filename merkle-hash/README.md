@@ -1,11 +1,21 @@
-# merkleforge-hash
+<p align="center">
+  <a href="https://github.com/1888-Labs/MerkleForge">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/1888-Labs/MerkleForge/main/assets/brand/svg/mark/merkleforge-mark-white.svg">
+      <img alt="MerkleForge" src="https://raw.githubusercontent.com/1888-Labs/MerkleForge/main/assets/brand/svg/mark/merkleforge-mark-black.svg" width="72">
+    </picture>
+  </a>
+</p>
 
-> Official hash adapters for MerkleForge Framework: SHA-256, Keccak-256, and
-> BLAKE3.
+<h1 align="center">merkleforge-hash</h1>
 
-[![Crates.io](https://img.shields.io/crates/v/merkleforge-hash.svg)](https://crates.io/crates/merkleforge-hash)
-[![docs.rs](https://docs.rs/merkleforge-hash/badge.svg)](https://docs.rs/merkleforge-hash)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+<p align="center">SHA-256, Keccak-256, and BLAKE3 hash adapters for MerkleForge,<br>with domain-separated leaf and internal-node hashing.</p>
+
+<p align="center">
+  <a href="https://crates.io/crates/merkleforge-hash"><img alt="crates.io" src="https://img.shields.io/crates/v/merkleforge-hash.svg?style=flat-square&label=crates.io&color=000000"></a>
+  <a href="https://docs.rs/merkleforge-hash"><img alt="docs.rs" src="https://img.shields.io/docsrs/merkleforge-hash?style=flat-square&label=docs.rs&color=000000"></a>
+  <a href="#license"><img alt="license" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-000000?style=flat-square"></a>
+</p>
 
 `merkleforge-hash` provides ready-made implementations of
 `merkle_core::traits::HashFunction`. These adapters can drive every tree in
@@ -83,14 +93,22 @@ Custom `HashFunction` implementations should preserve the same invariant.
 - Use `Blake3` when raw software throughput matters and Ethereum compatibility
   is not required.
 
-Benchmark data is available in [`BENCHMARKS.md`](../BENCHMARKS.md) and on the
+Benchmark data is available in [`BENCHMARKS.md`](https://github.com/1888-Labs/MerkleForge/blob/main/BENCHMARKS.md) and on the
 public benchmark dashboard.
 
 ## Links
 
 - API docs: <https://docs.rs/merkleforge-hash>
-- Repository: <https://github.com/dicethedev/MerkleForge>
-- Website: <https://dicethedev.github.io/MerkleForge/>
+- Repository: <https://github.com/1888-Labs/MerkleForge>
+- Website: <https://1888-labs.github.io/MerkleForge/>
+
+## Part of MerkleForge
+
+| Crate | Role |
+| --- | --- |
+| [`merkle-core`](https://crates.io/crates/merkle-core) | Shared traits, proof types, serialization, and errors |
+| [`merkleforge-hash`](https://crates.io/crates/merkleforge-hash) | SHA-256, Keccak-256, and BLAKE3 adapters |
+| [`merkle-variants`](https://crates.io/crates/merkle-variants) | Binary, Sparse, and Patricia tree implementations |
 
 ## Safety
 
@@ -105,7 +123,7 @@ security-critical environments.
 
 Licensed under either of:
 
-- [MIT License](../LICENSE)
-- [Apache License, Version 2.0](../LICENSE-APACHE)
+- [MIT License](https://github.com/1888-Labs/MerkleForge/blob/main/LICENSE)
+- [Apache License, Version 2.0](https://github.com/1888-Labs/MerkleForge/blob/main/LICENSE-APACHE)
 
 at your option.

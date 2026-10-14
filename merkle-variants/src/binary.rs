@@ -32,11 +32,14 @@
 //! # Ok::<(), merkle_core::error::MerkleError>(())
 //! ```
 
+use core::fmt;
+
 use merkle_core::{
     error::MerkleError,
     traits::{HashFunction, MerkleTree, ProofVerifier},
     types::{LeafIndex, MerkleProof, ProofNode, ProofSide, TreeMetadata},
 };
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A cache-friendly binary Merkle tree backed by a flat node array.
 ///
@@ -85,6 +88,41 @@ impl<H: HashFunction> BinaryMerkleTree<H> {
         };
         tree.recompute_root();
         tree
+    }
+
+    /// Builds a tree from many leaves in one pass.
+    ///
+    /// The result has the same root, indices, and proofs as inserting the
+    /// leaves one at a time, but internal nodes are computed once, in
+    /// `O(n)` hashes instead of `O(n log n)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MerkleError::EmptyLeafData`] if any leaf is empty. No tree
+    /// is returned in that case.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the number of leaves is too large to represent the flat
+    /// node array.
+    pub fn from_leaves<I>(leaves: I) -> Result<Self, MerkleError>
+    where
+        I: IntoIterator,
+        I::Item: AsRef<[u8]>,
+    {
+        let hashes = leaves
+            .into_iter()
+            .map(|leaf| {
+                let data = leaf.as_ref();
+                if data.is_empty() {
+                    Err(MerkleError::EmptyLeafData)
+                } else {
+                    Ok(H::hash(data))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self::from_leaf_hashes(hashes))
     }
 
     /// Inserts a non-empty leaf and returns its stable leaf index.
@@ -242,6 +280,36 @@ impl<H: HashFunction> BinaryMerkleTree<H> {
         proof: &MerkleProof<H::Digest>,
     ) -> bool {
         <Self as ProofVerifier<H>>::verify(expected_root, leaf_data, proof)
+    }
+
+    /// Builds a tree whose leaf layer is exactly `hashes`, dropping trailing
+    /// empty slots the same way [`Self::remove`] does.
+    fn from_leaf_hashes(hashes: Vec<H::Digest>) -> Self {
+        let mut tree = Self::new();
+        if hashes.is_empty() {
+            return tree;
+        }
+
+        let leaf_capacity = Self::padded_leaf_count(hashes.len());
+        tree.leaf_count = hashes.len();
+        tree.nodes = hashes;
+        tree.nodes
+            .resize(Self::node_count(leaf_capacity), H::empty());
+        tree.trim_empty_trailing_leaves();
+
+        if tree.leaf_count == 0 {
+            return Self::new();
+        }
+
+        let required_capacity = Self::padded_leaf_count(tree.leaf_count);
+        if required_capacity < leaf_capacity {
+            tree.resize_leaf_layer(required_capacity);
+        } else {
+            tree.recompute_root();
+        }
+        tree.height = required_capacity.ilog2() as usize + 1;
+
+        tree
     }
 
     const fn padded_leaf_count(leaf_count: usize) -> usize {
@@ -413,6 +481,77 @@ impl<H: HashFunction> ProofVerifier<H> for BinaryMerkleTree<H> {
 impl<H: HashFunction> Default for BinaryMerkleTree<H> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<H: HashFunction> Clone for BinaryMerkleTree<H> {
+    fn clone(&self) -> Self {
+        Self {
+            nodes: self.nodes.clone(),
+            leaf_count: self.leaf_count,
+            height: self.height,
+        }
+    }
+}
+
+impl<H: HashFunction> fmt::Debug for BinaryMerkleTree<H> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BinaryMerkleTree")
+            .field("hash_algorithm", &H::algorithm_name())
+            .field("leaf_count", &self.leaf_count)
+            .field("height", &self.height)
+            .field("root", &self.root())
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Serialize)]
+struct BinaryTreeReprRef<'a, D> {
+    hash_algorithm: &'a str,
+    leaves: &'a [D],
+}
+
+#[derive(Deserialize)]
+struct BinaryTreeRepr<D> {
+    hash_algorithm: String,
+    leaves: Vec<D>,
+}
+
+/// Serializes the hash algorithm name and the leaf layer.
+///
+/// Internal nodes are not stored; deserialization recomputes them, so a
+/// decoded tree is always internally consistent.
+impl<H: HashFunction> Serialize for BinaryMerkleTree<H>
+where
+    H::Digest: Serialize,
+{
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        BinaryTreeReprRef {
+            hash_algorithm: H::algorithm_name(),
+            leaves: &self.nodes[..self.leaf_count],
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de, H: HashFunction> Deserialize<'de> for BinaryMerkleTree<H>
+where
+    H::Digest: Deserialize<'de>,
+{
+    fn deserialize<De: Deserializer<'de>>(deserializer: De) -> Result<Self, De::Error> {
+        let repr = BinaryTreeRepr::<H::Digest>::deserialize(deserializer)?;
+        if repr.hash_algorithm != H::algorithm_name() {
+            return Err(serde::de::Error::custom(format!(
+                "tree was built with {}, expected {}",
+                repr.hash_algorithm,
+                H::algorithm_name()
+            )));
+        }
+        if repr.leaves.len().checked_next_power_of_two().is_none() {
+            return Err(serde::de::Error::custom("too many leaves"));
+        }
+
+        Ok(Self::from_leaf_hashes(repr.leaves))
     }
 }
 
@@ -804,6 +943,96 @@ mod tests {
             b"alice",
             &proof
         ));
+    }
+
+    fn sequential(leaves: &[&[u8]]) -> BinaryMerkleTree<Sha256> {
+        let mut tree = BinaryMerkleTree::<Sha256>::new();
+        for leaf in leaves {
+            tree.insert(leaf).unwrap();
+        }
+        tree
+    }
+
+    #[test]
+    fn from_leaves_matches_sequential_inserts() {
+        let leaves: Vec<Vec<u8>> = (0_u32..37).map(|i| i.to_be_bytes().to_vec()).collect();
+        for len in 0..leaves.len() {
+            let slices: Vec<&[u8]> = leaves[..len].iter().map(Vec::as_slice).collect();
+            let bulk = BinaryMerkleTree::<Sha256>::from_leaves(&slices).unwrap();
+            let expected = sequential(&slices);
+
+            assert_eq!(bulk.root(), expected.root(), "len {len}");
+            assert_eq!(bulk.leaf_count(), expected.leaf_count());
+            assert_eq!(bulk.height(), expected.height());
+            assert_eq!(bulk.nodes, expected.nodes);
+        }
+    }
+
+    #[test]
+    fn from_leaves_rejects_empty_leaf() {
+        let result = BinaryMerkleTree::<Sha256>::from_leaves([b"alice".as_slice(), b""]);
+
+        assert_eq!(result.err(), Some(MerkleError::EmptyLeafData));
+    }
+
+    #[test]
+    fn clone_is_independent() {
+        let original = sequential(&[b"alice", b"bob"]);
+        let mut copy = original.clone();
+        copy.insert(b"carol").unwrap();
+
+        assert_eq!(original.leaf_count(), 2);
+        assert_ne!(original.root(), copy.root());
+    }
+
+    #[test]
+    fn debug_summarizes_tree() {
+        let tree = sequential(&[b"alice"]);
+        let debug = format!("{tree:?}");
+
+        assert!(debug.contains("BinaryMerkleTree"));
+        assert!(debug.contains("leaf_count: 1"));
+    }
+
+    #[test]
+    fn serialization_round_trips_with_removed_leaves() {
+        use merkle_core::traits::Serializable;
+
+        let mut tree = sequential(&[b"alice", b"bob", b"carol", b"dave", b"eve"]);
+        tree.remove(LeafIndex(1)).unwrap();
+
+        let bytes = tree.to_bytes().unwrap();
+        let decoded = BinaryMerkleTree::<Sha256>::from_bytes(&bytes).unwrap();
+
+        assert_eq!(decoded.root(), tree.root());
+        assert_eq!(decoded.leaf_count(), tree.leaf_count());
+        assert_eq!(decoded.height(), tree.height());
+        assert_eq!(decoded.nodes, tree.nodes);
+    }
+
+    #[test]
+    fn deserialization_rejects_other_hash_algorithm() {
+        use merkle_core::traits::Serializable;
+        use merkleforge_hash::Blake3;
+
+        let bytes = sequential(&[b"alice"]).to_bytes().unwrap();
+
+        assert!(BinaryMerkleTree::<Blake3>::from_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn deserialization_drops_trailing_empty_leaves() {
+        use merkle_core::traits::Serializable;
+
+        let repr = (
+            "SHA-256".to_string(),
+            vec![Sha256::hash(b"alice"), Sha256::empty(), Sha256::empty()],
+        );
+        let bytes = repr.to_bytes().unwrap();
+        let decoded = BinaryMerkleTree::<Sha256>::from_bytes(&bytes).unwrap();
+
+        assert_eq!(decoded.root(), sequential(&[b"alice"]).root());
+        assert_eq!(decoded.leaf_count(), 1);
     }
 
     #[test]

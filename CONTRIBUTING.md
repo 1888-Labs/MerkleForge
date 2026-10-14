@@ -4,9 +4,15 @@ Thanks for helping improve MerkleForge Framework. Contributions are welcome
 across correctness, documentation, benchmarks, examples, developer experience,
 and performance analysis.
 
+By participating, you agree to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
+New here? Read [ARCHITECTURE.md](ARCHITECTURE.md) first. It explains how the
+crates fit together and has a "where to make a change" table.
+
 ## Good First Contributions
 
-- Improve README docs, Rustdoc, examples, or website explanations.
+- Improve README docs, Rustdoc, examples, or the documentation site in `docs/`.
 - Add benchmark reproduction notes for different hardware.
 - Add test vectors for Binary, Sparse, or Patricia Merkle trees.
 - Improve error messages or API examples.
@@ -15,17 +21,21 @@ and performance analysis.
 ## Development Setup
 
 ```bash
-git clone https://github.com/dicethedev/MerkleForge.git
+git clone https://github.com/1888-Labs/MerkleForge.git
 cd MerkleForge
 cargo test --workspace
 ```
 
-For website work:
+The website and documentation are one [Vocs](https://vocs.dev) site in `docs/`:
 
 ```bash
-npm --prefix website ci
-npm --prefix website run build
+npm --prefix docs ci
+npm --prefix docs run dev     # http://localhost:5173/MerkleForge/
+npm --prefix docs run build
 ```
+
+Pages live in `docs/pages/` as MDX. Rust snippets must compile against the
+current crates.
 
 ## Recommended Workflow
 
@@ -46,11 +56,15 @@ make lint
 make test
 ```
 
-For website changes, also run:
+For documentation changes, also run:
 
 ```bash
-npm --prefix website run build
+npm --prefix docs run build
 ```
+
+For performance changes, include before/after numbers from Criterion. See
+[BENCHMARKS.md](BENCHMARKS.md) for the commands and [profiling/](profiling/)
+for flamegraphs and `perf`.
 
 ## Pull Request Guidelines
 
@@ -60,6 +74,14 @@ npm --prefix website run build
   artifacts out of commits.
 - Include benchmark numbers only when the environment and command are recorded.
 - Avoid unrelated refactors in feature or bug-fix pull requests.
+
+## Releases (maintainers)
+
+Releases run through the manual workflow in `.github/workflows/release.yml`.
+Trigger it with a semantic version such as `0.4.1`. It tests the workspace,
+bumps the version and changelog, tags the release, publishes the crates,
+creates the GitHub release, and sends the Telegram notification. For local
+release tooling, run `make install-release-tools`.
 
 ## Security
 

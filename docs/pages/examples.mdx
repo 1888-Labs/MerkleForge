@@ -1,0 +1,245 @@
+---
+title: Examples
+description: Copy-pasteable MerkleForge programs for binary proofs, sparse state, Patricia witnesses, hashing, metadata, and proof transport.
+layout: minimal
+---
+
+# Examples
+
+Complete programs you can paste into `src/main.rs`. Each one compiles against the current
+crates; add the dependencies first:
+
+```toml [Cargo.toml]
+[dependencies]
+merkle-core = "0.4.1"
+merkleforge-hash = "0.4.1"
+merkle-variants = "0.4.1"
+```
+
+:::note
+Examples that use `BinaryMerkleTree::from_leaves` or tree serialization need the current
+repository version (listed as **Unreleased** in the changelog). Everything else works with 0.4.1.
+:::
+
+## Binary inclusion proof
+
+Build a tree, prove one leaf, and verify it with only the root, the proof, and the leaf bytes.
+[Guide](/docs/guides/binary-merkle-tree)
+
+```rust [src/main.rs]
+use merkle_core::types::LeafIndex;
+use merkle_variants::BinaryMerkleTree;
+use merkleforge_hash::Sha256;
+
+fn main() -> Result<(), merkle_core::error::MerkleError> {
+    let mut tree = BinaryMerkleTree::<Sha256>::new();
+    tree.insert(b"alice:100")?;
+    tree.insert(b"bob:250")?;
+
+    let proof = tree.generate_proof(LeafIndex(0))?;
+    let root = tree.root().expect("tree is not empty");
+
+    assert!(BinaryMerkleTree::<Sha256>::verify(
+        root,
+        b"alice:100",
+        &proof,
+    ));
+    Ok(())
+}
+```
+
+## Sparse account state
+
+Commit balances under 32-byte keys and prove one account's value.
+[Guide](/docs/guides/sparse-merkle-tree)
+
+```rust [src/main.rs]
+use merkle_variants::SparseMerkleTree;
+use merkleforge_hash::Sha256;
+
+fn main() -> Result<(), merkle_core::error::MerkleError> {
+    let mut state = SparseMerkleTree::<Sha256>::new();
+    let alice = [7_u8; 32];
+    let bob = [9_u8; 32];
+
+    state.insert(alice, b"balance:100")?;
+    state.insert(bob, b"balance:250")?;
+
+    let proof = state.generate_membership_proof(alice)?;
+    let root = state.root().expect("state is not empty");
+
+    assert!(SparseMerkleTree::<Sha256>::verify_membership(
+        root,
+        alice,
+        b"balance:100",
+        &proof,
+    ));
+
+    // Prove that a key is absent.
+    let carol = [11_u8; 32];
+    let absent = state.generate_membership_proof(carol)?;
+    assert!(SparseMerkleTree::<Sha256>::verify_non_membership(root, carol, &absent));
+    Ok(())
+}
+```
+
+## Patricia witness
+
+Ethereum-style key-value state with an RLP witness. [Guide](/docs/guides/merkle-patricia-trie)
+
+```rust [src/main.rs]
+use merkle_variants::MerklePatriciaTrie;
+use merkleforge_hash::Keccak256;
+
+fn main() -> Result<(), merkle_core::error::MerkleError> {
+    let mut trie = MerklePatriciaTrie::<Keccak256>::new();
+
+    trie.insert(b"account:alice", b"100")?;
+    trie.insert(b"account:bob", b"250")?;
+
+    let proof = trie.generate_proof(b"account:alice")?;
+    let root = trie.root().expect("trie is not empty");
+
+    assert_eq!(proof.key, b"account:alice");
+    assert_eq!(proof.value.as_deref(), Some(b"100".as_slice()));
+    println!("witness has {} RLP nodes", proof.proof_nodes.len());
+    assert!(MerklePatriciaTrie::<Keccak256>::verify_proof(root, &proof));
+    Ok(())
+}
+```
+
+## Swap the hash function
+
+The same tree API over three algorithms. [Guide](/docs/guides/hash-functions)
+
+```rust [src/main.rs]
+use merkle_core::traits::MerkleTree;
+use merkle_variants::BinaryMerkleTree;
+use merkleforge_hash::{Blake3, Keccak256, Sha256};
+
+fn main() -> Result<(), merkle_core::error::MerkleError> {
+    let mut sha_tree = BinaryMerkleTree::<Sha256>::new();
+    let mut eth_tree = BinaryMerkleTree::<Keccak256>::new();
+    let mut fast_tree = BinaryMerkleTree::<Blake3>::new();
+
+    for leaf in [b"alice".as_slice(), b"bob", b"carol"] {
+        sha_tree.insert(leaf)?;
+        eth_tree.insert(leaf)?;
+        fast_tree.insert(leaf)?;
+    }
+
+    for meta in [sha_tree.metadata(), eth_tree.metadata(), fast_tree.metadata()] {
+        println!("{}: {} leaves, height {}", meta.hash_algorithm, meta.leaf_count, meta.height);
+    }
+    Ok(())
+}
+```
+
+## Hash directly
+
+Use an adapter without a tree: leaf hashes, parent hashes, and metadata.
+
+```rust [src/main.rs]
+use merkle_core::traits::HashFunction;
+use merkleforge_hash::Blake3;
+
+fn main() {
+    let left = Blake3::hash(b"left leaf");
+    let right = Blake3::hash(b"right leaf");
+    let parent = Blake3::hash_nodes(&left, &right);
+
+    assert_ne!(parent, left);
+    assert_eq!(Blake3::digest_size(), 32);
+    assert_eq!(Blake3::algorithm_name(), "BLAKE3");
+}
+```
+
+## Tree metadata
+
+Inspect a tree for logs and dashboards. [Guide](/docs/guides/metadata)
+
+```rust [src/main.rs]
+use merkle_core::traits::MerkleTree;
+use merkle_variants::BinaryMerkleTree;
+use merkleforge_hash::Sha256;
+
+fn main() -> Result<(), merkle_core::error::MerkleError> {
+    let tree = BinaryMerkleTree::<Sha256>::from_leaves(["alice", "bob", "carol"])?;
+
+    let metadata = tree.metadata();
+    println!("variant: {}", metadata.variant);
+    println!("algorithm: {}", metadata.hash_algorithm);
+    println!("leaves: {}", metadata.leaf_count);
+    println!("height: {}", metadata.height);
+    println!("allocated nodes: {}", metadata.node_count);
+    Ok(())
+}
+```
+
+## Proof transport
+
+Serialize a proof to bytes on the server and decode it on the client.
+[Guide](/docs/guides/serialization)
+
+```rust [src/main.rs]
+use merkle_core::{
+    traits::Serializable,
+    types::{LeafIndex, MerkleProof},
+};
+use merkle_variants::BinaryMerkleTree;
+use merkleforge_hash::Sha256;
+
+fn main() -> Result<(), merkle_core::error::MerkleError> {
+    // Server
+    let tree = BinaryMerkleTree::<Sha256>::from_leaves(["tx1", "tx2", "tx3"])?;
+    let root = *tree.root().expect("tree is not empty");
+    let bytes = tree.generate_proof(LeafIndex(1))?.to_bytes()?;
+
+    // ... send `root` (trusted channel) and `bytes` (any channel) ...
+
+    // Client
+    let proof = MerkleProof::<[u8; 32]>::from_bytes(&bytes)?;
+    assert!(BinaryMerkleTree::<Sha256>::verify(&root, b"tx2", &proof));
+    Ok(())
+}
+```
+
+## Stateless light client
+
+The repository's runnable example: the tree is dropped before verification.
+
+```rust [merkle-variants/examples/light_client.rs]
+use merkle_core::{error::MerkleError, types::LeafIndex};
+use merkle_variants::BinaryMerkleTree;
+use merkleforge_hash::Sha256;
+
+fn main() -> Result<(), MerkleError> {
+    let proof;
+    let root;
+
+    {
+        let mut tree = BinaryMerkleTree::<Sha256>::new();
+        tree.insert(b"tx:alice->bob:100")?;
+        tree.insert(b"tx:bob->carol:50")?;
+        tree.insert(b"tx:carol->dave:25")?;
+
+        root = *tree.root().expect("tree has inserted leaves");
+        proof = tree.generate_proof(LeafIndex(0))?;
+
+        println!("server: built tree and exported root + proof");
+    }
+
+    let valid = BinaryMerkleTree::<Sha256>::verify(&root, b"tx:alice->bob:100", &proof);
+
+    println!("client: tree dropped before verification");
+    println!("Stateless verification: {valid}");
+
+    Ok(())
+}
+```
+
+```bash
+cargo run -p merkle-variants --example light_client
+```
+
+See it in the browser on the [live demo](/demo).

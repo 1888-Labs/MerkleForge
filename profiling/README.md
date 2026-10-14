@@ -1,7 +1,15 @@
-# Profiling MerkleForge
+<p align="center">
+  <a href="https://github.com/1888-Labs/MerkleForge">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/brand/svg/mark/merkleforge-mark-white.svg">
+      <img alt="MerkleForge" src="../assets/brand/svg/mark/merkleforge-mark-black.svg" width="72">
+    </picture>
+  </a>
+</p>
 
-> Reproducible CPU profiling notes and reference artifacts for MerkleForge
-> Framework.
+<h1 align="center">Profiling MerkleForge</h1>
+
+<p align="center">Reproducible CPU profiling notes and reference artifacts.</p>
 
 Criterion answers "how long did this operation take?" Profiling answers "where
 did the CPU time go?" Use this directory when investigating construction,

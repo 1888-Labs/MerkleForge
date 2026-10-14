@@ -1,8 +1,8 @@
 target/
 __pycache__/
 *.pyc
-website/dist/
-website/node_modules/
-website/tsconfig.tsbuildinfo
-website/public/benchmark-data.json
-website/public/site-data.json
+_site/
+docs/node_modules/
+docs/dist/
+docs/public/benchmark-data.json
+docs/public/site-data.json

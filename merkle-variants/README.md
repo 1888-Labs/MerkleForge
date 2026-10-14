@@ -1,11 +1,21 @@
-# merkle-variants
+<p align="center">
+  <a href="https://github.com/1888-Labs/MerkleForge">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/1888-Labs/MerkleForge/main/assets/brand/svg/mark/merkleforge-mark-white.svg">
+      <img alt="MerkleForge" src="https://raw.githubusercontent.com/1888-Labs/MerkleForge/main/assets/brand/svg/mark/merkleforge-mark-black.svg" width="72">
+    </picture>
+  </a>
+</p>
 
-> Binary, Sparse, and Ethereum-compatible Patricia Merkle tree implementations
-> for MerkleForge Framework.
+<h1 align="center">merkle-variants</h1>
 
-[![Crates.io](https://img.shields.io/crates/v/merkle-variants.svg)](https://crates.io/crates/merkle-variants)
-[![docs.rs](https://docs.rs/merkle-variants/badge.svg)](https://docs.rs/merkle-variants)
-[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+<p align="center">Binary, Sparse, and Ethereum-compatible Patricia Merkle trees<br>for MerkleForge, generic over any hash adapter.</p>
+
+<p align="center">
+  <a href="https://crates.io/crates/merkle-variants"><img alt="crates.io" src="https://img.shields.io/crates/v/merkle-variants.svg?style=flat-square&label=crates.io&color=000000"></a>
+  <a href="https://docs.rs/merkle-variants"><img alt="docs.rs" src="https://img.shields.io/docsrs/merkle-variants?style=flat-square&label=docs.rs&color=000000"></a>
+  <a href="#license"><img alt="license" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-000000?style=flat-square"></a>
+</p>
 
 `merkle-variants` contains the concrete tree implementations built on top of
 `merkle-core`. Every tree is generic over `H: HashFunction`, so you can choose
@@ -79,8 +89,9 @@ fn main() -> Result<(), MerkleError> {
     let proof = tree.generate_membership_proof(key)?;
     let root = tree.root().expect("tree is not empty");
 
-    assert!(SparseMerkleTree::<Sha256>::verify(
+    assert!(SparseMerkleTree::<Sha256>::verify_membership(
         root,
+        key,
         b"account:alice:100",
         &proof,
     ));
@@ -147,15 +158,23 @@ cargo bench --bench sparse_tree
 cargo bench --bench patricia_trie
 ```
 
-Benchmark summaries live in [`BENCHMARKS.md`](../BENCHMARKS.md).
+Benchmark summaries live in [`BENCHMARKS.md`](https://github.com/1888-Labs/MerkleForge/blob/main/BENCHMARKS.md).
 
 ## Links
 
 - API docs: <https://docs.rs/merkle-variants>
-- Repository: <https://github.com/dicethedev/MerkleForge>
-- Website: <https://dicethedev.github.io/MerkleForge/>
+- Repository: <https://github.com/1888-Labs/MerkleForge>
+- Website: <https://1888-labs.github.io/MerkleForge/>
 - Hash adapters: <https://crates.io/crates/merkleforge-hash>
 - Core traits: <https://crates.io/crates/merkle-core>
+
+## Part of MerkleForge
+
+| Crate | Role |
+| --- | --- |
+| [`merkle-core`](https://crates.io/crates/merkle-core) | Shared traits, proof types, serialization, and errors |
+| [`merkleforge-hash`](https://crates.io/crates/merkleforge-hash) | SHA-256, Keccak-256, and BLAKE3 adapters |
+| [`merkle-variants`](https://crates.io/crates/merkle-variants) | Binary, Sparse, and Patricia tree implementations |
 
 ## Safety
 
@@ -170,7 +189,7 @@ security-critical environments.
 
 Licensed under either of:
 
-- [MIT License](../LICENSE)
-- [Apache License, Version 2.0](../LICENSE-APACHE)
+- [MIT License](https://github.com/1888-Labs/MerkleForge/blob/main/LICENSE)
+- [Apache License, Version 2.0](https://github.com/1888-Labs/MerkleForge/blob/main/LICENSE-APACHE)
 
 at your option.
