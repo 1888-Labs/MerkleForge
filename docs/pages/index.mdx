@@ -10,6 +10,7 @@ showAskAi: false
 ---
 
 import { HomePage, Link } from 'vocs'
+import { CrateDownloads } from '../components/CrateDownloads'
 
 <div className="mf-page">
 
@@ -73,6 +74,12 @@ merkle-variants = "0.5.0"
       <div className="mf-feature-copy"><code>MerklePatriciaTrie&lt;Keccak256&gt;</code> matches Ethereum state roots and passes the official trie test vectors.</div>
     </div>
   </div>
+</div>
+
+<div className="mf-section">
+  <div className="mf-eyebrow">Downloads</div>
+  <div className="mf-section-title">Live from crates.io</div>
+  <CrateDownloads />
 </div>
 
 <div className="mf-section mf-split">

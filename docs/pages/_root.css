@@ -404,6 +404,45 @@ samp {
   text-underline-offset: 3px;
 }
 
+.mf-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+
+a.mf-stat:hover {
+  border-color: light-dark(#000000, #ffffff);
+}
+
+.mf-stat[data-variant='total'] {
+  background: light-dark(#000000, #ffffff);
+  border-color: transparent;
+}
+
+.mf-stat[data-variant='total'] .mf-eyebrow,
+.mf-stat[data-variant='total'] .mf-stat-note {
+  color: light-dark(#a3a3a3, #5c5c5c);
+}
+
+.mf-stat-value {
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: light-dark(#000000, #ffffff);
+}
+
+.mf-stat[data-variant='total'] .mf-stat-value {
+  color: light-dark(#ffffff, #000000);
+}
+
+.mf-stat-note {
+  font-size: 14px;
+  color: light-dark(#6b6b6b, #a3a3a3);
+}
+
 .mf-split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);

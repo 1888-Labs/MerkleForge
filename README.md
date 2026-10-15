@@ -21,6 +21,12 @@
 </p>
 
 <p align="center">
+  <a href="https://crates.io/crates/merkle-core"><img alt="merkle-core downloads" src="https://img.shields.io/crates/d/merkle-core?style=flat-square&label=merkle-core&color=000000"></a>
+  <a href="https://crates.io/crates/merkleforge-hash"><img alt="merkleforge-hash downloads" src="https://img.shields.io/crates/d/merkleforge-hash?style=flat-square&label=merkleforge-hash&color=000000"></a>
+  <a href="https://crates.io/crates/merkle-variants"><img alt="merkle-variants downloads" src="https://img.shields.io/crates/d/merkle-variants?style=flat-square&label=merkle-variants&color=000000"></a>
+</p>
+
+<p align="center">
   <a href="https://1888-labs.github.io/MerkleForge/">Website</a> ·
   <a href="https://1888-labs.github.io/MerkleForge/docs/getting-started">Docs</a> ·
   <a href="https://1888-labs.github.io/MerkleForge/demo/">Live demo</a> ·
