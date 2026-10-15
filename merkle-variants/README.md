@@ -13,6 +13,7 @@
 
 <p align="center">
   <a href="https://crates.io/crates/merkle-variants"><img alt="crates.io" src="https://img.shields.io/crates/v/merkle-variants.svg?style=flat-square&label=crates.io&color=000000"></a>
+  <a href="https://crates.io/crates/merkle-variants"><img alt="downloads" src="https://img.shields.io/crates/d/merkle-variants?style=flat-square&label=downloads&color=000000"></a>
   <a href="https://docs.rs/merkle-variants"><img alt="docs.rs" src="https://img.shields.io/docsrs/merkle-variants?style=flat-square&label=docs.rs&color=000000"></a>
   <a href="#license"><img alt="license" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-000000?style=flat-square"></a>
 </p>

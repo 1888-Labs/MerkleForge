@@ -13,6 +13,7 @@
 
 <p align="center">
   <a href="https://crates.io/crates/merkleforge-hash"><img alt="crates.io" src="https://img.shields.io/crates/v/merkleforge-hash.svg?style=flat-square&label=crates.io&color=000000"></a>
+  <a href="https://crates.io/crates/merkleforge-hash"><img alt="downloads" src="https://img.shields.io/crates/d/merkleforge-hash?style=flat-square&label=downloads&color=000000"></a>
   <a href="https://docs.rs/merkleforge-hash"><img alt="docs.rs" src="https://img.shields.io/docsrs/merkleforge-hash?style=flat-square&label=docs.rs&color=000000"></a>
   <a href="#license"><img alt="license" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-000000?style=flat-square"></a>
 </p>
