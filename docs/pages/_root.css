@@ -494,7 +494,12 @@ a.mf-stat:hover {
 }
 
 .mf-owner-logo {
+  height: 28px;
   width: auto;
+}
+
+.mf-owner-compact .mf-owner-logo {
+  height: 20px;
 }
 
 .mf-hero-owner {
