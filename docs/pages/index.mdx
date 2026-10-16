@@ -11,11 +11,13 @@ showAskAi: false
 
 import { HomePage, Link } from 'vocs'
 import { CrateDownloads } from '../components/CrateDownloads'
+import { OwnerCredit } from '../components/Owner'
 
 <div className="mf-page">
 
 <div className="mf-hero">
   <div>
+    <div className="mf-hero-owner"><OwnerCredit /></div>
     <HomePage.Logo className="mf-hero-logo" />
     <div className="mf-hero-tagline">Authenticated data structures for Rust</div>
     <div className="mf-hero-copy">
@@ -144,7 +146,7 @@ fn main() -> Result<(), MerkleError> {
     <div className="mf-card mf-feature">
       <div className="mf-feature-title">ProofStream</div>
       <div className="mf-feature-copy">Turns live indexed DEX activity into portable proof receipts. Rows are committed with a MerkleForge <code>BinaryMerkleTree&lt;Keccak256&gt;</code> and verified in the browser from a single row, its proof, and the dataset root.</div>
-      <div className="mf-feature-copy"><a href="https://github.com/dicethedev/ProofStream">Repository</a> · <a href="https://ethglobal.com/showcase/proofstream-jvup1">ETHGlobal showcase</a></div>
+      <div className="mf-feature-copy"><a href="https://github.com/1888-Labs/ProofStream">Repository</a> · <a href="https://1888-labs.github.io/ProofStream/">Live app</a> · <a href="https://ethglobal.com/showcase/proofstream-jvup1">ETHGlobal showcase</a></div>
     </div>
     <div className="mf-card mf-feature">
       <div className="mf-feature-title">Your project?</div>
@@ -154,6 +156,7 @@ fn main() -> Result<(), MerkleError> {
 </div>
 
 <div className="mf-footer">
+  <OwnerCredit />
   <span>MIT OR Apache-2.0 · Not yet independently audited, see <Link to="/docs/reference/security">Security</Link></span>
   <span><a href="https://crates.io/crates/merkle-variants">crates.io</a> · <a href="https://docs.rs/merkle-core">docs.rs</a> · <a href="https://github.com/1888-Labs/MerkleForge">GitHub</a></span>
 </div>

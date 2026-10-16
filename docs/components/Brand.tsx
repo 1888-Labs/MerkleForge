@@ -47,6 +47,31 @@ export function BrandPreview() {
   )
 }
 
+/** The 1888 Labs logo on its light and dark panels. */
+export function OwnerPreview() {
+  const asset = useAsset()
+  const panel = (background: string, border: string): CSSProperties => ({
+    background,
+    border: `1px solid ${border}`,
+    borderRadius: 12,
+    padding: 32,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 140,
+  })
+  return (
+    <div className="mf-grid" data-cols="2" style={{ margin: '24px 0' }}>
+      <div style={panel('#0F1115', '#262626')}>
+        <img alt="1888 Labs logo, on dark" height={56} src={asset('1888labs-logo-on-dark.svg')} />
+      </div>
+      <div style={panel('#F3F1EA', '#E5E5E5')}>
+        <img alt="1888 Labs logo, on light" height={56} src={asset('1888labs-logo-on-light.svg')} />
+      </div>
+    </div>
+  )
+}
+
 /** The monochrome palette as swatches. */
 export function BrandSwatches() {
   return (
