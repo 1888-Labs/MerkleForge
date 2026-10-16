@@ -37,11 +37,17 @@ export function OwnerLogo(props: { height?: number }) {
 }
 
 /** "A project by 1888 Labs" credit with the org logo. */
-export function OwnerCredit() {
+export function OwnerCredit(props: { compact?: boolean }) {
+  const { compact = false } = props
   return (
-    <a className="mf-owner" href={owner.url} rel="noopener" target="_blank">
-      <span className="mf-owner-label">A project by</span>
-      <OwnerLogo />
+    <a
+      className={compact ? 'mf-owner mf-owner-compact' : 'mf-owner'}
+      href={owner.url}
+      rel="noopener"
+      target="_blank"
+    >
+      {!compact && <span className="mf-owner-label">A project by</span>}
+      <OwnerLogo height={compact ? 20 : 28} />
     </a>
   )
 }
