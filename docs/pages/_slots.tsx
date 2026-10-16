@@ -9,7 +9,7 @@ export function Footer() {
   if (path === '/') return null
   return (
     <div className="mf-site-footer">
-      <OwnerCredit />
+      <OwnerCredit compact />
       <span>
         Built and maintained by <a href={owner.url}>{owner.name}</a> · MIT OR Apache-2.0
       </span>
