@@ -133,7 +133,7 @@ is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Projects using MerkleForge
 
-- **[ProofStream](https://github.com/dicethedev/ProofStream)**: commits live DEX
+- **[ProofStream](https://github.com/1888-Labs/ProofStream)**: commits live DEX
   activity with `BinaryMerkleTree<Keccak256>` so a browser can verify a single
   record against the dataset root
   ([ETHGlobal showcase](https://ethglobal.com/showcase/proofstream-jvup1)).
