@@ -476,6 +476,52 @@ a.mf-stat:hover {
   color: light-dark(#000000, #ffffff);
 }
 
+/* ── Owner (1888 Labs) ──────────────────────────────────────────────── */
+
+.mf-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.mf-owner-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.mf-owner-logo {
+  width: auto;
+}
+
+.mf-hero-owner {
+  margin-bottom: 20px;
+  color: light-dark(#6b6b6b, #a3a3a3);
+}
+
+.mf-site-footer {
+  padding-top: 24px;
+  border-top: 1px solid light-dark(#e5e5e5, #262626);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: light-dark(#6b6b6b, #a3a3a3);
+}
+
+.mf-site-footer a {
+  color: inherit;
+}
+
+.mf-site-footer a:hover {
+  color: light-dark(#000000, #ffffff);
+}
+
 /* Landing install block: code groups render as normal Vocs blocks. */
 .mf-install > * {
   margin: 0 !important;
