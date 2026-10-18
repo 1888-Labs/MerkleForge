@@ -18,7 +18,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `BinaryMerkleTree::generate_multi_proof` and `verify_multi_proof`, with the
   new `BinaryMultiProof` type: one proof for several leaves, sharing sibling
   hashes. Its serde and bincode format matches the TypeScript port
-  (`@1888-labs/merkle-variants`), so multiproofs move between Rust and
+  (`@merkleforge/variants`), so multiproofs move between Rust and
   TypeScript unchanged.
 
 ---
