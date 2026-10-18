@@ -98,6 +98,16 @@ To see the full server/client split, run
 [Choosing a tree](https://1888-labs.github.io/MerkleForge/docs/guides/choosing-a-tree) ·
 [Live demo](https://1888-labs.github.io/MerkleForge/demo/)
 
+### TypeScript
+
+The same trees, hashes, and proofs are on npm as
+[`@merkleforge/*`](https://github.com/1888-Labs/MerkleForge-ts), with roots and
+proofs that match these crates byte for byte:
+
+```bash
+npm i @merkleforge/variants @merkleforge/hash @merkleforge/core
+```
+
 ## Project map
 
 | Crate | Published as | What it holds |
@@ -107,6 +117,7 @@ To see the full server/client split, run
 | [`merkle-variants/`](merkle-variants/) | `merkle-variants` | Binary, Sparse, Patricia trees |
 | [`merkle-bench/`](merkle-bench/) | not published | Criterion benchmark suite |
 | [`docs/`](docs/) | n/a | The website and docs ([Vocs](https://vocs.dev)) |
+| [MerkleForge-ts](https://github.com/1888-Labs/MerkleForge-ts) | `@merkleforge/*` on npm | TypeScript packages and Solidity verifiers |
 
 | Read this | For |
 |-----------|-----|
