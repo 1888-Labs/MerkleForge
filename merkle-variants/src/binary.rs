@@ -49,7 +49,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// neighbouring leaves share siblings, so it is usually far fewer.
 ///
 /// The serialized form (serde and [`Serializable`](merkle_core::traits::Serializable))
-/// matches `BinaryMultiProof` in the TypeScript package `@1888-labs/merkle-variants`.
+/// matches `BinaryMultiProof` in the TypeScript package `@merkleforge/variants`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BinaryMultiProof<D> {
     /// Proven leaf indices, strictly increasing.
