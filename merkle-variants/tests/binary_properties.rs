@@ -2,7 +2,7 @@ use merkle_core::{
     traits::Serializable,
     types::{LeafIndex, MerkleProof},
 };
-use merkle_variants::BinaryMerkleTree;
+use merkle_variants::{BinaryMerkleTree, BinaryMultiProof};
 use merkleforge_hash::Sha256;
 use proptest::{collection::vec, prelude::*, test_runner::TestCaseError};
 use std::fmt::Display;
@@ -142,5 +142,35 @@ proptest! {
         prop_assert!(original_valid);
         prop_assert_eq!(original_valid, recovered_valid);
         prop_assert_eq!(proof, recovered);
+    }
+
+    #[test]
+    fn multiproof_verifies_and_round_trips(
+        leaves in non_empty_leaves(1..40),
+        picks in vec(any::<usize>(), 1..12),
+    ) {
+        let tree = build_tree(&leaves)?;
+        let root = required_root(&tree)?;
+        let indices: Vec<LeafIndex> = picks.iter().map(|pick| LeafIndex(pick % leaves.len())).collect();
+        let proof = case_result(tree.generate_multi_proof(&indices))?;
+        let items: Vec<&[u8]> = proof.leaf_indices.iter().map(|&i| leaves[i].as_slice()).collect();
+        prop_assert!(BinaryMerkleTree::<Sha256>::verify_multi_proof(&root, &items, &proof));
+
+        let single_total: usize = proof
+            .leaf_indices
+            .iter()
+            .map(|&i| tree.generate_proof(LeafIndex(i)).map(|p| p.path.len()).unwrap_or(0))
+            .sum();
+        prop_assert!(proof.hashes.len() <= single_total);
+
+        let bytes = case_result(proof.to_bytes())?;
+        let recovered = case_result(BinaryMultiProof::<[u8; 32]>::from_bytes(&bytes))?;
+        prop_assert_eq!(&proof, &recovered);
+
+        if !proof.hashes.is_empty() {
+            let mut tampered = proof.clone();
+            tampered.hashes[0][0] ^= 1;
+            prop_assert!(!BinaryMerkleTree::<Sha256>::verify_multi_proof(&root, &items, &tampered));
+        }
     }
 }
