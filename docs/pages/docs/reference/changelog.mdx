@@ -15,6 +15,14 @@ all published crates. `merkle-bench` is never published. The project follows
 
 ## Highlights
 
+### v0.5.1 (2026-10-20)
+
+- **Added:** `BinaryMerkleTree::generate_multi_proof` and `verify_multi_proof`, with the new
+  `BinaryMultiProof` type: one proof for several leaves, sharing sibling hashes. Its serde and
+  bincode format matches the TypeScript package
+  [`@merkleforge/variants`](https://www.npmjs.com/package/@merkleforge/variants), so multiproofs
+  move between Rust and TypeScript unchanged.
+
 ### v0.5.0 (2026-10-14)
 
 Correctness and performance fixes. Roots and proofs for the shipped hash adapters are unchanged.

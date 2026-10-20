@@ -14,8 +14,8 @@ This page maps the public API of each crate. For full signatures and doc comment
 | `merkle-variants` | `merkle_variants` | [docs.rs/merkle-variants](https://docs.rs/merkle-variants) |
 
 :::note
-docs.rs documents the latest release (v0.5.0). Items marked *v0.5.0* below were added in that
-release.
+docs.rs documents the latest release (v0.5.1). Items marked *v0.5.0* or *v0.5.1* below were
+added in that release.
 :::
 
 ## merkle-core
@@ -89,9 +89,12 @@ Top-level re-exports: `BinaryMerkleTree`, `SparseMerkleTree`, `MerklePatriciaTri
 | `root()`, `leaf_count()`, `is_empty()`, `height()` | Queries |
 | `generate_proof(LeafIndex) -> Result<MerkleProof>` | Inclusion proof |
 | `verify(root, leaf, &proof) -> bool` | Stateless, associated function |
+| `generate_multi_proof(&[LeafIndex]) -> Result<BinaryMultiProof>` | One proof for several leaves (*v0.5.1*) |
+| `verify_multi_proof(root, &leaves, &proof) -> bool` | Stateless; leaves in `proof.leaf_indices` order (*v0.5.1*) |
 
 Implements `MerkleTree<H>`, `ProofVerifier<H>`; `Clone`, `Debug`, `Serialize`, `Deserialize`
-(*v0.5.0*). Guide: [Binary Merkle tree](/docs/guides/binary-merkle-tree).
+(*v0.5.0*). `BinaryMultiProof<D>` (`leaf_indices`, `leaf_count`, `hashes`) serializes in the
+same format as the TypeScript package (*v0.5.1*). Guide: [Binary Merkle tree](/docs/guides/binary-merkle-tree).
 
 ### `sparse` — [`SparseMerkleTree<H>`](https://docs.rs/merkle-variants/latest/merkle_variants/sparse/struct.SparseMerkleTree.html)
 
