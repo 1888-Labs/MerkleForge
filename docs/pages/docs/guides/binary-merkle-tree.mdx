@@ -111,6 +111,37 @@ fn main() -> Result<(), MerkleError> {
 for empty leaf data, a wrong leaf, a tampered sibling, a path of the wrong length, or sides that
 don't match the leaf index.
 
+## Prove several leaves at once
+
+A multiproof covers several leaves with one set of sibling hashes. Neighbouring leaves share
+siblings, so it is usually much smaller than one proof per leaf.
+
+```rust
+use merkle_core::prelude::*;
+use merkle_variants::BinaryMerkleTree;
+use merkleforge_hash::Sha256;
+
+fn main() -> Result<(), MerkleError> {
+    let txs: Vec<String> = (0..8).map(|i| format!("tx-{i}")).collect();
+    let tree = BinaryMerkleTree::<Sha256>::from_leaves(&txs)?;
+    let root = tree.root().expect("non-empty");
+
+    // Indices may be unsorted or repeated; the proof stores them sorted and unique.
+    let proof = tree.generate_multi_proof(&[LeafIndex(5), LeafIndex(4), LeafIndex(6), LeafIndex(7)])?;
+    assert_eq!(proof.leaf_indices, vec![4, 5, 6, 7]);
+    assert_eq!(proof.hashes.len(), 1); // vs. 12 hashes for four separate proofs
+
+    let leaves: Vec<&[u8]> = proof.leaf_indices.iter().map(|&i| txs[i].as_bytes()).collect();
+    assert!(BinaryMerkleTree::<Sha256>::verify_multi_proof(root, &leaves, &proof));
+    Ok(())
+}
+```
+
+`verify_multi_proof` returns `false` for unsorted or repeated indices, a wrong leaf, a tampered,
+missing, or extra hash, or a `leaf_count` with a different tree depth. `BinaryMultiProof`
+serializes with serde and `Serializable`, in the same format as the TypeScript package
+[`@merkleforge/variants`](https://www.npmjs.com/package/@merkleforge/variants).
+
 ## Height and padding
 
 | Leaves | Padded slots | `height()` | Proof depth |

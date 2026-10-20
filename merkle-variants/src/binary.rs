@@ -41,6 +41,25 @@ use merkle_core::{
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+/// One inclusion proof for several leaves of a [`BinaryMerkleTree`].
+///
+/// `hashes` holds only the siblings that cannot be computed from the proven
+/// leaves, ordered layer by layer from the leaves up and left to right within
+/// a layer. Proving `k` of `n` leaves needs at most `k * log2(n)` hashes, and
+/// neighbouring leaves share siblings, so it is usually far fewer.
+///
+/// The serialized form (serde and [`Serializable`](merkle_core::traits::Serializable))
+/// matches `BinaryMultiProof` in the TypeScript package `@merkleforge/variants`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BinaryMultiProof<D> {
+    /// Proven leaf indices, strictly increasing.
+    pub leaf_indices: Vec<usize>,
+    /// Number of leaves in the tree the proof was generated from.
+    pub leaf_count: usize,
+    /// Sibling hashes in proof order.
+    pub hashes: Vec<D>,
+}
+
 /// A cache-friendly binary Merkle tree backed by a flat node array.
 ///
 /// Leaf nodes occupy the first power-of-two-sized layer. Each following
@@ -284,6 +303,132 @@ impl<H: HashFunction> BinaryMerkleTree<H> {
 
     /// Builds a tree whose leaf layer is exactly `hashes`, dropping trailing
     /// empty slots the same way [`Self::remove`] does.
+    /// Generates one proof for several leaves.
+    ///
+    /// Indices may be in any order and may repeat; the proof lists them
+    /// sorted and de-duplicated in [`BinaryMultiProof::leaf_indices`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MerkleError::EmptyTree`] for an empty tree,
+    /// [`MerkleError::InvalidProofStructure`] when `indices` is empty, and
+    /// [`MerkleError::IndexOutOfBounds`] for an index past the last leaf.
+    pub fn generate_multi_proof(
+        &self,
+        indices: &[LeafIndex],
+    ) -> Result<BinaryMultiProof<H::Digest>, MerkleError> {
+        if self.is_empty() {
+            return Err(MerkleError::EmptyTree);
+        }
+        let mut leaf_indices: Vec<usize> = indices.iter().map(|index| index.value()).collect();
+        leaf_indices.sort_unstable();
+        leaf_indices.dedup();
+        if leaf_indices.is_empty() {
+            return Err(MerkleError::InvalidProofStructure(
+                "a multiproof needs at least one leaf".to_string(),
+            ));
+        }
+        if let Some(&index) = leaf_indices.iter().find(|&&index| index >= self.leaf_count) {
+            return Err(MerkleError::IndexOutOfBounds {
+                index,
+                len: self.leaf_count,
+            });
+        }
+
+        let mut hashes = Vec::new();
+        let mut known = leaf_indices.clone();
+        let mut layer_start = 0;
+        let mut layer_width = self.leaf_capacity();
+        while layer_width > 1 {
+            let mut next = Vec::with_capacity(known.len());
+            let mut i = 0;
+            while i < known.len() {
+                let offset = known[i];
+                if offset.is_multiple_of(2) && known.get(i + 1) == Some(&(offset + 1)) {
+                    i += 1;
+                } else {
+                    hashes.push(self.nodes[layer_start + (offset ^ 1)].clone());
+                }
+                next.push(offset / 2);
+                i += 1;
+            }
+            known = next;
+            layer_start += layer_width;
+            layer_width /= 2;
+        }
+
+        Ok(BinaryMultiProof {
+            leaf_indices,
+            leaf_count: self.leaf_count,
+            hashes,
+        })
+    }
+
+    /// Verifies a multiproof for `leaves`, the raw leaf data in
+    /// [`BinaryMultiProof::leaf_indices`] order.
+    ///
+    /// Returns `false` for any malformed proof: unsorted or repeated indices,
+    /// an index past `leaf_count`, a leaf count that does not match the
+    /// number of indices, empty leaf data, or unused or missing hashes.
+    #[must_use]
+    pub fn verify_multi_proof<L: AsRef<[u8]>>(
+        expected_root: &H::Digest,
+        leaves: &[L],
+        proof: &BinaryMultiProof<H::Digest>,
+    ) -> bool {
+        let indices = &proof.leaf_indices;
+        if proof.leaf_count == 0
+            || indices.is_empty()
+            || indices.len() != leaves.len()
+            || indices.windows(2).any(|pair| pair[0] >= pair[1])
+            || indices.last().is_some_and(|&last| last >= proof.leaf_count)
+            || leaves.iter().any(|leaf| leaf.as_ref().is_empty())
+        {
+            return false;
+        }
+        let Some(mut layer_width) = proof.leaf_count.checked_next_power_of_two() else {
+            return false;
+        };
+
+        let mut known: Vec<(usize, H::Digest)> = indices
+            .iter()
+            .zip(leaves)
+            .map(|(&index, leaf)| (index, H::hash(leaf.as_ref())))
+            .collect();
+        let mut hashes = proof.hashes.iter();
+        while layer_width > 1 {
+            let mut next = Vec::with_capacity(known.len());
+            let mut i = 0;
+            while i < known.len() {
+                let (offset, ref hash) = known[i];
+                let parent = match known.get(i + 1) {
+                    Some((right, right_hash))
+                        if offset.is_multiple_of(2) && *right == offset + 1 =>
+                    {
+                        i += 1;
+                        H::hash_nodes(hash, right_hash)
+                    }
+                    _ => {
+                        let Some(sibling) = hashes.next() else {
+                            return false;
+                        };
+                        if offset.is_multiple_of(2) {
+                            H::hash_nodes(hash, sibling)
+                        } else {
+                            H::hash_nodes(sibling, hash)
+                        }
+                    }
+                };
+                next.push((offset / 2, parent));
+                i += 1;
+            }
+            known = next;
+            layer_width /= 2;
+        }
+
+        hashes.next().is_none() && matches!(known.as_slice(), [(_, root)] if root == expected_root)
+    }
+
     fn from_leaf_hashes(hashes: Vec<H::Digest>) -> Self {
         let mut tree = Self::new();
         if hashes.is_empty() {
@@ -1048,5 +1193,129 @@ mod tests {
             b"alice",
             &proof
         ));
+    }
+
+    fn multiproof_tree(n: usize) -> (Vec<Vec<u8>>, BinaryMerkleTree<Sha256>) {
+        let leaves: Vec<Vec<u8>> = (0..n).map(|i| format!("leaf-{i}").into_bytes()).collect();
+        let tree = BinaryMerkleTree::<Sha256>::from_leaves(&leaves).unwrap();
+        (leaves, tree)
+    }
+
+    fn picked<'a>(leaves: &'a [Vec<u8>], proof: &BinaryMultiProof<[u8; 32]>) -> Vec<&'a [u8]> {
+        proof
+            .leaf_indices
+            .iter()
+            .map(|&i| leaves[i].as_slice())
+            .collect()
+    }
+
+    #[test]
+    fn multiproof_verifies_any_subset() {
+        let (leaves, tree) = multiproof_tree(11);
+        let root = *tree.root().unwrap();
+        for subset in [
+            vec![0],
+            vec![10],
+            vec![3, 4],
+            vec![0, 5, 10],
+            (0..11).collect(),
+        ] {
+            let indices: Vec<LeafIndex> = subset.into_iter().map(LeafIndex).collect();
+            let proof = tree.generate_multi_proof(&indices).unwrap();
+            assert!(BinaryMerkleTree::<Sha256>::verify_multi_proof(
+                &root,
+                &picked(&leaves, &proof),
+                &proof
+            ));
+        }
+    }
+
+    #[test]
+    fn multiproof_for_one_leaf_matches_the_single_proof() {
+        let (_, tree) = multiproof_tree(11);
+        let multi = tree.generate_multi_proof(&[LeafIndex(6)]).unwrap();
+        let single = tree.generate_proof(LeafIndex(6)).unwrap();
+        let path: Vec<[u8; 32]> = single.path.into_iter().map(|node| node.hash).collect();
+        assert_eq!(multi.hashes, path);
+    }
+
+    #[test]
+    fn multiproof_shares_siblings_and_normalizes_indices() {
+        let (_, tree) = multiproof_tree(11);
+        let proof = tree
+            .generate_multi_proof(&[
+                LeafIndex(7),
+                LeafIndex(4),
+                LeafIndex(6),
+                LeafIndex(5),
+                LeafIndex(7),
+            ])
+            .unwrap();
+        assert_eq!(proof.leaf_indices, vec![4, 5, 6, 7]);
+        assert_eq!(proof.hashes.len(), 2);
+        let all: Vec<LeafIndex> = (0..8).map(LeafIndex).collect();
+        let full =
+            BinaryMerkleTree::<Sha256>::from_leaves((0..8).map(|i| format!("leaf-{i}"))).unwrap();
+        assert!(full.generate_multi_proof(&all).unwrap().hashes.is_empty());
+    }
+
+    #[test]
+    fn multiproof_errors() {
+        let (_, tree) = multiproof_tree(11);
+        assert!(matches!(
+            tree.generate_multi_proof(&[LeafIndex(11)]),
+            Err(MerkleError::IndexOutOfBounds { index: 11, len: 11 })
+        ));
+        assert!(matches!(
+            tree.generate_multi_proof(&[]),
+            Err(MerkleError::InvalidProofStructure(_))
+        ));
+        assert_eq!(
+            BinaryMerkleTree::<Sha256>::new().generate_multi_proof(&[LeafIndex(0)]),
+            Err(MerkleError::EmptyTree)
+        );
+    }
+
+    #[test]
+    fn multiproof_rejects_tampering() {
+        let (leaves, tree) = multiproof_tree(11);
+        let root = *tree.root().unwrap();
+        let proof = tree
+            .generate_multi_proof(&[LeafIndex(1), LeafIndex(4), LeafIndex(9)])
+            .unwrap();
+        let items = picked(&leaves, &proof);
+        let verify = |p: &BinaryMultiProof<[u8; 32]>, l: &[&[u8]]| {
+            BinaryMerkleTree::<Sha256>::verify_multi_proof(&root, l, p)
+        };
+        assert!(verify(&proof, &items));
+
+        let mut forged = items.clone();
+        forged[0] = b"forged";
+        assert!(!verify(&proof, &forged));
+        assert!(!verify(&proof, &items[1..]));
+
+        let mut flipped = proof.clone();
+        flipped.hashes[0][0] ^= 1;
+        assert!(!verify(&flipped, &items));
+
+        let mut missing = proof.clone();
+        missing.hashes.pop();
+        assert!(!verify(&missing, &items));
+
+        let mut extra = proof.clone();
+        extra.hashes.push(root);
+        assert!(!verify(&extra, &items));
+
+        let mut unsorted = proof.clone();
+        unsorted.leaf_indices = vec![4, 1, 9];
+        assert!(!verify(&unsorted, &items));
+
+        let mut deeper = proof.clone();
+        deeper.leaf_count = 17;
+        assert!(!verify(&deeper, &items));
+
+        let mut empty = proof;
+        empty.leaf_count = 0;
+        assert!(!verify(&empty, &items));
     }
 }
