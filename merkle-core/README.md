@@ -34,14 +34,14 @@ Use this crate when you want to:
 
 ```toml
 [dependencies]
-merkle-core = "0.5.0"
+merkle-core = "0.5.1"
 ```
 
 For bare-metal or embedded targets with `alloc`:
 
 ```toml
 [dependencies]
-merkle-core = { version = "0.5.0", default-features = false, features = ["alloc"] }
+merkle-core = { version = "0.5.1", default-features = false, features = ["alloc"] }
 ```
 
 The default `std` feature is recommended for normal server, CLI, and desktop

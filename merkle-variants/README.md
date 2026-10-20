@@ -26,9 +26,9 @@ SHA-256, Keccak-256, BLAKE3, or your own adapter without changing the tree API.
 
 ```toml
 [dependencies]
-merkle-core = "0.5.0"
-merkleforge-hash = "0.5.0"
-merkle-variants = "0.5.0"
+merkle-core = "0.5.1"
+merkleforge-hash = "0.5.1"
+merkle-variants = "0.5.1"
 ```
 
 ## Which Tree Should I Use?
