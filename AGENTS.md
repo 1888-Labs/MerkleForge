@@ -8,7 +8,8 @@ It applies to the entire repository unless a deeper `AGENTS.md` overrides it.
 MerkleForge is a Rust framework for authenticated data structures. The
 workspace provides shared traits and types, pluggable hash adapters, Binary and
 Sparse Merkle trees, an Ethereum-compatible Merkle Patricia Trie, benchmarks,
-examples, and a Vocs documentation website.
+and examples. The documentation website lives in
+[1888-Labs/merkleforge-docs](https://github.com/1888-Labs/merkleforge-docs).
 
 ## Repository Map
 
@@ -20,9 +21,6 @@ examples, and a Vocs documentation website.
   their variant-specific proof APIs.
 - `merkle-bench/`: Criterion benchmarks. Benchmark code must not affect the
   public library API.
-- `docs/`: Vocs website (docs, examples, demo, benchmarks). Pages are MDX in
-  `docs/pages/`; React components are in `docs/components/`.
-- `scripts/build_site.py`: builds the site plus Criterion reports for Pages.
 - `tests/`: repository-level Python tests for supporting scripts.
 - `.github/`: CI, release, Pages, and notification automation.
 
@@ -89,13 +87,6 @@ make test
 For `no_std` or feature-gating work, also check the affected crate without its
 default features, using the feature combination documented by that crate.
 
-For website changes:
-
-```bash
-npm --prefix docs ci
-npm --prefix docs run build
-```
-
 For Python automation changes:
 
 ```bash
@@ -119,13 +110,9 @@ If a required command cannot be run, report that clearly with the reason.
 
 ## Documentation And Website
 
-- Update crate READMEs, root documentation, `docs/pages/`, examples, and `CHANGELOG.md` when
-  a public API or user-visible behavior changes.
+- Update crate READMEs, root documentation, examples, and `CHANGELOG.md` when a public API or
+  user-visible behavior changes, and the pages in merkleforge-docs to match.
 - Keep examples compilable and use the current public crate names.
-- Prefer Vocs built-in components and the existing `docs/components/` over
-  introducing duplicate UI patterns.
-- Do not hardcode the crate version in the site config; `docs/vocs.config.ts`
-  reads it from `Cargo.toml`, and the release script bumps install snippets.
 - Keep the security notice accurate: MerkleForge has not completed an
   independent security audit.
 

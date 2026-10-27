@@ -12,7 +12,7 @@ crates fit together and has a "where to make a change" table.
 
 ## Good First Contributions
 
-- Improve README docs, Rustdoc, examples, or the documentation site in `docs/`.
+- Improve README docs, Rustdoc, examples, or the [documentation site](https://github.com/1888-Labs/merkleforge-docs).
 - Add benchmark reproduction notes for different hardware.
 - Add test vectors for Binary, Sparse, or Patricia Merkle trees.
 - Improve error messages or API examples.
@@ -26,16 +26,9 @@ cd MerkleForge
 cargo test --workspace
 ```
 
-The website and documentation are one [Vocs](https://vocs.dev) site in `docs/`:
-
-```bash
-npm --prefix docs ci
-npm --prefix docs run dev     # http://localhost:5173/MerkleForge/
-npm --prefix docs run build
-```
-
-Pages live in `docs/pages/` as MDX. Rust snippets must compile against the
-current crates.
+The website and documentation live in their own repository,
+[1888-Labs/merkleforge-docs](https://github.com/1888-Labs/merkleforge-docs), and are
+published at <https://1888-labs.github.io/MerkleForge/>.
 
 ## Recommended Workflow
 

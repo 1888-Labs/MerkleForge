@@ -11,8 +11,7 @@
 #   3. no-std  — verifies merkle-core on a bare-metal target
 #   4. bench-dry — ensures benchmarks compile (no regression)
 #   5. docs     — rustdoc build check
-#   6. site     — builds the Vocs website in docs/
-#   7. scripts  — unit tests for the Python scripts in .github/scripts
+#   6. scripts  — unit tests for the Python scripts in .github/scripts
 #
 # All Rust jobs use the toolchain pinned in rust-toolchain.toml.
 
@@ -135,29 +134,7 @@ jobs:
           RUSTDOCFLAGS="-D warnings"
           cargo doc --workspace --all-features --no-deps
 
-  # ── 6. Website build ────────────────────────────────────────────────────
-  site:
-    name: Website build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: docs/package-lock.json
-
-      - name: Install site dependencies
-        run: npm ci
-        working-directory: docs
-
-      - name: Build Vocs site
-        run: npm run build
-        working-directory: docs
-
-  # ── 7. Script tests ─────────────────────────────────────────────────────
+  # ── 6. Script tests ─────────────────────────────────────────────────────
   scripts:
     name: Script tests
     runs-on: ubuntu-latest

@@ -116,7 +116,7 @@ npm i @merkleforge/variants @merkleforge/hash @merkleforge/core
 | [`merkle-hash/`](merkle-hash/) | `merkleforge-hash` | SHA-256, Keccak-256, BLAKE3 adapters |
 | [`merkle-variants/`](merkle-variants/) | `merkle-variants` | Binary, Sparse, Patricia trees |
 | [`merkle-bench/`](merkle-bench/) | not published | Criterion benchmark suite |
-| [`docs/`](docs/) | n/a | The website and docs ([Vocs](https://vocs.dev)) |
+| [merkleforge-docs](https://github.com/1888-Labs/merkleforge-docs) | n/a | The website and docs ([Vocs](https://vocs.dev)) |
 | [MerkleForge-ts](https://github.com/1888-Labs/MerkleForge-ts) | `@merkleforge/*` on npm | TypeScript packages and Solidity verifiers |
 
 | Read this | For |

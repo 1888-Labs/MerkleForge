@@ -48,11 +48,10 @@ MerkleForge/
 │   ├── tests/                    # property tests, trait contract, Ethereum vectors
 │   └── examples/light_client.rs  # stateless verification demo
 ├── merkle-bench/benches/         # one Criterion file per benchmark group
-├── docs/                         # Vocs website: docs, examples, demo, benchmarks
-├── scripts/                      # site build, flamegraph, and energy helpers
+├── scripts/                      # flamegraph and energy helpers
 ├── profiling/                    # profiling guide + reference flamegraph
 ├── assets/brand/                 # official logos, icons, banners, favicons
-└── .github/workflows/            # CI, website, release, notifications
+└── .github/workflows/            # CI, release, notifications
 ```
 
 ## Hashing and domain separation
@@ -113,5 +112,5 @@ server/client split.
 | Fix or optimise a tree | `merkle-variants/src/<variant>.rs` and its tests in `merkle-variants/tests/` |
 | Add test vectors | `merkle-variants/tests/fixtures/` |
 | Add a benchmark | `merkle-bench/benches/`, then record results in [`BENCHMARKS.md`](BENCHMARKS.md) |
-| Improve the docs or website | `docs/pages/` (MDX) and `docs/components/` |
+| Improve the docs or website | [1888-Labs/merkleforge-docs](https://github.com/1888-Labs/merkleforge-docs) |
 | Change CI or releases | `.github/workflows/` |
