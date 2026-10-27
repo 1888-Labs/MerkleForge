@@ -1,1 +1,0 @@
-var e=async()=>JSON.stringify(await(await fetch(`/MerkleForge/assets/search-index-bec02f3c4587.json`)).json());export{e as getSearchIndex};
