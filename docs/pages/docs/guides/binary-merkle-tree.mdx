@@ -1,17 +1,24 @@
 ---
 title: Binary Merkle tree
-description: Build, update, prove, and verify with BinaryMerkleTree.
+description: Build, update, prove, and verify with BinaryMerkleTree, in Rust or TypeScript.
 ---
+
+import { LangBar, Rust, TypeScript } from '../../../components/Lang'
 
 # Binary Merkle tree
 
-`BinaryMerkleTree<H>` is a balanced binary tree over an ordered list of leaves. It stores leaves
-and internal nodes in one flat, cache-friendly array, pads the leaf layer to a power of two, and
-gives `O(log n)` inclusion proofs addressed by `LeafIndex`.
+<Rust inline>`BinaryMerkleTree<H>`</Rust><TypeScript inline>`BinaryMerkleTree`</TypeScript> is a
+balanced binary tree over an ordered list of leaves. It stores leaves and internal nodes in one flat,
+cache-friendly array, pads the leaf layer to a power of two, and gives `O(log n)` inclusion proofs
+addressed by <Rust inline>`LeafIndex`</Rust><TypeScript inline>a numeric leaf index</TypeScript>.
 
 Use it for transaction batches, logs, file chunks, snapshot commitments, and Bitcoin-style SPV.
 
+<LangBar />
+
 ## Create a tree
+
+<Rust>
 
 ```rust
 use merkle_core::prelude::*;
@@ -48,7 +55,43 @@ fn main() -> Result<(), MerkleError> {
 `from_leaves` was added in v0.5.0.
 :::
 
+</Rust>
+
+<TypeScript>
+
+```ts
+import { bytesEqual, utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+// Empty tree, grows as you insert.
+const tree = new BinaryMerkleTree(Sha256)
+console.assert(tree.isEmpty())
+console.assert(tree.root() === undefined)
+
+// Pre-size the leaf layer for at least 1,000 leaves (rounded up to 1,024).
+// Reserving storage adds no logical leaves.
+const reserved = BinaryMerkleTree.withCapacity(Sha256, 1_000)
+console.assert(reserved.leafCount === 0)
+
+// Build from a known leaf set in one O(n) pass.
+const batch = BinaryMerkleTree.fromLeaves(Sha256, ['tx1', 'tx2', 'tx3'].map(utf8))
+console.assert(batch.leafCount === 3)
+
+tree.insert(utf8('tx1'))
+tree.insert(utf8('tx2'))
+tree.insert(utf8('tx3'))
+console.assert(bytesEqual(tree.root()!, batch.root()!))
+```
+
+`fromLeaves` accepts any `Iterable<Uint8Array>` (an array, a generator, a `Set`). Encode strings
+with `utf8` first. It throws a `MerkleError` with code `EmptyLeafData` if any leaf is empty.
+
+</TypeScript>
+
 ## Insert and remove
+
+<Rust>
 
 ```rust
 use merkle_core::prelude::*;
@@ -79,7 +122,47 @@ fn main() -> Result<(), MerkleError> {
 }
 ```
 
+</Rust>
+
+<TypeScript>
+
+```ts
+import { isMerkleError, utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+const tree = new BinaryMerkleTree(Sha256)
+
+// insert returns the stable index of the new leaf.
+const alice = tree.insert(utf8('alice:100'))
+const bob = tree.insert(utf8('bob:250'))
+const carol = tree.insert(utf8('carol:75'))
+console.assert(alice === 0 && bob === 1 && carol === 2)
+console.assert(tree.height === 3) // 3 leaves pad to 4 slots: 4 -> 2 -> 1
+
+// Removing an interior leaf replaces it with hasher.empty(); later indices stay put.
+tree.remove(bob)
+console.assert(tree.leafCount === 3)
+
+// Removing the last leaf shrinks the logical leaf count.
+tree.remove(carol)
+console.assert(tree.leafCount === 1)
+
+// Empty data is rejected so it can't be confused with padding.
+let error: unknown
+try {
+  tree.insert(new Uint8Array())
+} catch (e) {
+  error = e
+}
+console.assert(isMerkleError(error, 'EmptyLeafData'))
+```
+
+</TypeScript>
+
 ## Generate and verify proofs
+
+<Rust>
 
 ```rust
 use merkle_core::prelude::*;
@@ -111,10 +194,51 @@ fn main() -> Result<(), MerkleError> {
 for empty leaf data, a wrong leaf, a tampered sibling, a path of the wrong length, or sides that
 don't match the leaf index.
 
+</Rust>
+
+<TypeScript>
+
+```ts
+import { isMerkleError, proofDepth, utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+const txs = ['tx:alice->bob:100', 'tx:bob->carol:50', 'tx:carol->dave:25']
+const tree = BinaryMerkleTree.fromLeaves(Sha256, txs.map(utf8))
+const root = tree.root()!
+
+txs.forEach((tx, i) => {
+  const proof = tree.generateProof(i)
+  console.assert(proof.leafIndex === i)
+  console.assert(proofDepth(proof) === 2)
+  console.assert(BinaryMerkleTree.verify(Sha256, root, utf8(tx), proof))
+})
+
+// Out-of-range indices throw a MerkleError, never a bare exception.
+let error: unknown
+try {
+  tree.generateProof(9)
+} catch (e) {
+  error = e
+}
+console.assert(
+  isMerkleError(error, 'IndexOutOfBounds') && error.detail.index === 9 && error.detail.len === 3,
+)
+```
+
+`BinaryMerkleTree.verify` is a static method: it needs no tree instance, only the hash function.
+It returns `false` (never throws) for empty leaf data, a wrong leaf, a tampered sibling, a path of
+the wrong length, sides that don't match the leaf index, or an index or leaf count that isn't a
+non-negative safe integer.
+
+</TypeScript>
+
 ## Prove several leaves at once
 
 A multiproof covers several leaves with one set of sibling hashes. Neighbouring leaves share
 siblings, so it is usually much smaller than one proof per leaf.
+
+<Rust>
 
 ```rust
 use merkle_core::prelude::*;
@@ -142,9 +266,40 @@ missing, or extra hash, or a `leaf_count` with a different tree depth. `BinaryMu
 serializes with serde and `Serializable`, in the same format as the TypeScript package
 [`@merkleforge/variants`](https://www.npmjs.com/package/@merkleforge/variants).
 
+</Rust>
+
+<TypeScript>
+
+```ts
+import { utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+const txs = Array.from({ length: 8 }, (_, i) => utf8(`tx-${i}`))
+const tree = BinaryMerkleTree.fromLeaves(Sha256, txs)
+const root = tree.root()!
+
+// Indices may be unsorted or repeated; the proof stores them sorted and unique.
+const proof = tree.generateMultiProof([5, 4, 6, 7])
+console.assert(proof.leafIndices.join() === '4,5,6,7')
+console.assert(proof.hashes.length === 1) // vs. 12 hashes for four separate proofs
+
+const leaves = proof.leafIndices.map((i) => txs[i]!)
+console.assert(BinaryMerkleTree.verifyMultiProof(Sha256, root, leaves, proof))
+```
+
+`verifyMultiProof` returns `false` for unsorted or repeated indices, a wrong leaf, a tampered,
+missing, or extra hash, or a `leafCount` with a different tree depth. Calling
+`generateMultiProof` with no indices throws `InvalidProofStructure`. `encodeBinaryMultiProof` /
+`decodeBinaryMultiProof` and `multiProofToSerdeJSON` / `multiProofFromSerdeJSON` produce the same
+bytes and JSON as the Rust `BinaryMultiProof`, and `toSolidityBinaryMultiProof` formats a
+Keccak-256 multiproof for the Solidity verifier.
+
+</TypeScript>
+
 ## Height and padding
 
-| Leaves | Padded slots | `height()` | Proof depth |
+| Leaves | Padded slots | <Rust inline>`height()`</Rust><TypeScript inline>`height`</TypeScript> | Proof depth |
 | --- | --- | --- | --- |
 | 0 | 0 | 0 | – |
 | 1 | 1 | 1 | 0 (trivial proof) |
@@ -153,9 +308,13 @@ serializes with serde and `Serializable`, in the same format as the TypeScript p
 | 5–8 | 8 | 4 | 3 |
 | 1,000 | 1,024 | 11 | 10 |
 
-A single-leaf tree has a **trivial** proof (`proof.is_trivial()`): the leaf hash is the root.
+A single-leaf tree has a **trivial** proof
+(<Rust inline>`proof.is_trivial()`</Rust><TypeScript inline>`isTrivialProof(proof)`</TypeScript>):
+the leaf hash is the root.
 
 ## Through the generic trait
+
+<Rust>
 
 `BinaryMerkleTree` implements both `MerkleTree<H>` and `ProofVerifier<H>`:
 
@@ -183,14 +342,82 @@ fn main() -> Result<(), MerkleError> {
 }
 ```
 
+</Rust>
+
+<TypeScript>
+
+`BinaryMerkleTree` implements the `MerkleTree` interface from `@merkleforge/core`, and its static
+`verify` matches the `ProofVerifier` function type, so code written against the interfaces works
+with any tree:
+
+```ts
+import { type MerkleTree, type ProofVerifier, utf8 } from '@merkleforge/core'
+import { Blake3 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+// Code written against the interfaces works with any tree.
+const tree: MerkleTree = new BinaryMerkleTree(Blake3)
+const verify: ProofVerifier = BinaryMerkleTree.verify
+
+tree.insert(utf8('leaf'))
+const proof = tree.generateProof(0)
+const root = tree.root()!
+
+console.assert(verify(tree.hasher, root, utf8('leaf'), proof))
+```
+
+</TypeScript>
+
 ## Clone, Debug, and serde
+
+<Rust>
 
 `BinaryMerkleTree` implements `Clone`, `Debug`, `Default`, `Serialize`, and `Deserialize`. The
 serialized form stores only the hash algorithm name and the leaf hashes; internal nodes are
 recomputed on load. See [Serialization](/docs/guides/serialization).
 
+</Rust>
+
+<TypeScript>
+
+There is no `clone` or debug formatting in TypeScript. `toJSON()` returns the hash algorithm name
+and the leaf hashes in hex (so `JSON.stringify(tree)` works directly), and
+`BinaryMerkleTree.fromJSON` recomputes the internal nodes on load. A round trip is also the way to
+copy a tree. `fromJSON` throws `DeserializationError` if the JSON was written with a different hash.
+
+```ts
+import { bytesEqual, utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+const tree = BinaryMerkleTree.fromLeaves(Sha256, ['a', 'b', 'c'].map(utf8))
+
+// toJSON keeps the hash name and leaf hashes; fromJSON rebuilds the rest.
+const json = JSON.stringify(tree)
+const copy = BinaryMerkleTree.fromJSON(Sha256, JSON.parse(json))
+console.assert(bytesEqual(copy.root()!, tree.root()!))
+```
+
+See [Serialization](/docs/guides/serialization).
+
+</TypeScript>
+
 ## Performance
+
+<Rust>
 
 On the reference machine (i7-1185G7), building a 100,000-leaf SHA-256 tree takes about 268 ms,
 proof generation about 79 ns, and verification about 3 µs. See
 [Benchmarks](/docs/performance/benchmarks) for the full tables.
+
+</Rust>
+
+<TypeScript>
+
+In the published TypeScript run at 131,072 Keccak-256 leaves, `BinaryMerkleTree` generates one
+proof in 8–11 µs and verifies one in about 148 µs with pure-JavaScript Keccak-256, or 41 µs with
+[`@merkleforge/hash-wasm`](/docs/guides/hash-functions). See
+[BENCHMARKS.md](https://github.com/1888-Labs/MerkleForge-ts/blob/main/BENCHMARKS.md) for the full
+comparison with other JavaScript libraries.
+
+</TypeScript>

@@ -1,18 +1,40 @@
 ---
 title: Errors
-description: MerkleError variants, when each one occurs, and how to handle them.
+description: MerkleError variants, when each one occurs, and how to handle them in Rust or TypeScript.
 ---
+
+import { LangBar, Rust, TypeScript } from '../../../components/Lang'
 
 # Errors
 
-Every fallible MerkleForge API returns `Result<T, MerkleError>`. Verification functions return
-`bool` instead: a bad proof is an expected outcome, not an error.
+Fallible MerkleForge operations report a `MerkleError`. Verification functions return a boolean
+instead: a bad proof is an expected outcome, not an error.
+
+<LangBar />
+
+<Rust>
+
+Every fallible MerkleForge API returns `Result<T, MerkleError>`.
 
 `MerkleError` lives in `merkle_core::error` (and the prelude). It implements `Debug`, `Clone`,
 `PartialEq`, `Eq`, `Display`, and, with the default `std` feature, `std::error::Error`, so it works
 with `?`, `Box<dyn Error>`, `anyhow`, and `thiserror`.
 
+</Rust>
+
+<TypeScript>
+
+Every fallible MerkleForge API throws a `MerkleError`. It is exported from `@merkleforge/core` and
+extends the built-in `Error`, so `try`/`catch`, `instanceof Error`, and error reporting tools work
+as usual. Each error carries a `detail` object whose `code` names the case (also available as
+`error.code`), plus that case's fields. `isMerkleError(error, code?)` is a type guard that narrows
+`detail` to the given code.
+
+</TypeScript>
+
 ## Variants
+
+<Rust>
 
 | Variant | Raised when |
 | --- | --- |
@@ -27,7 +49,33 @@ with `?`, `Box<dyn Error>`, `anyhow`, and `thiserror`.
 | `UnsupportedOperation(&'static str)` | The variant can't do this, e.g. removing a missing sparse or Patricia key, or index-based Patricia proofs |
 | `RlpError(String)` | Malformed RLP or hex-prefix data in the Patricia trie |
 
+</Rust>
+
+<TypeScript>
+
+The codes and messages match the Rust variants. Rust's tuple payloads become named fields.
+
+| `detail` | Raised when |
+| --- | --- |
+| `{ code: 'EmptyTree' }` | Proof generation (or binary `remove`) on a tree with no leaves |
+| `{ code: 'IndexOutOfBounds', index, len }` | A leaf index past the last logical leaf, negative, or not an integer |
+| `{ code: 'InvalidProof' }` | A witness doesn't connect to the root in APIs that return the proven value, such as `MerklePatriciaTrie.proveValue` and `@merkleforge/ethereum` (the `verify*` functions return `false` instead) |
+| `{ code: 'InvalidProofStructure', reason }` | A proof's shape is inconsistent (e.g. `generateMultiProof` with no indices) |
+| `{ code: 'EmptyLeafData' }` | Inserting an empty value (empty data would be indistinguishable from padding) |
+| `{ code: 'SerializationError', reason }` | Reserved for parity with Rust; the shipped encoders don't fail |
+| `{ code: 'DeserializationError', reason }` | `decode*`, `*FromSerdeJSON`, or `fromJSON` got malformed data, or JSON written with a different hash |
+| `{ code: 'HashError', reason }` | For custom adapters; not raised by the shipped ones |
+| `{ code: 'UnsupportedOperation', operation }` | The variant can't do this, e.g. removing a missing sparse or Patricia key, or index-based Patricia proofs |
+| `{ code: 'RlpError', reason }` | Malformed RLP or hex-prefix data in the Patricia trie |
+
+Misusing a helper outside the tree types, such as passing an odd-length string to `fromHex`, throws
+a plain `TypeError` or `RangeError` instead.
+
+</TypeScript>
+
 ## Handling errors
+
+<Rust>
 
 `MerkleError` is `#[non_exhaustive]`: new variants may arrive in minor releases, so keep a
 fallback arm.
@@ -63,7 +111,51 @@ fn main() -> Result<(), MerkleError> {
 }
 ```
 
+</Rust>
+
+<TypeScript>
+
+Switch on `error.detail.code`; TypeScript narrows `detail` in each case. New codes may arrive in
+minor releases, so keep a `default` branch, and rethrow anything that isn't a `MerkleError`.
+
+```ts
+import { isMerkleError, type MerkleProof, proofDepth, utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+function describe(attempt: () => MerkleProof): string {
+  try {
+    return `proof with ${proofDepth(attempt())} siblings`
+  } catch (error) {
+    if (!isMerkleError(error)) throw error
+    switch (error.detail.code) {
+      case 'EmptyTree':
+        return 'tree has no leaves'
+      case 'IndexOutOfBounds':
+        return `leaf ${error.detail.index} is outside the current leaf count ${error.detail.len}`
+      case 'EmptyLeafData':
+        return 'empty leaves are rejected'
+      default:
+        return error.message
+    }
+  }
+}
+
+const tree = new BinaryMerkleTree(Sha256)
+console.assert(describe(() => tree.generateProof(0)) === 'tree has no leaves')
+
+tree.insert(utf8('alice'))
+console.assert(
+  describe(() => tree.generateProof(3)) === 'leaf 3 is outside the current leaf count 1',
+)
+console.assert(describe(() => tree.generateProof(0)) === 'proof with 0 siblings')
+```
+
+</TypeScript>
+
 ## Display messages
+
+<Rust>
 
 ```rust
 use merkle_core::error::MerkleError;
@@ -75,7 +167,28 @@ fn main() {
 }
 ```
 
-## Using with `Box<dyn Error>`
+</Rust>
+
+<TypeScript>
+
+`error.message` holds the same text as the Rust `Display` output, and `error.name` is
+`'MerkleError'`.
+
+```ts
+import { MerkleError } from '@merkleforge/core'
+
+const err = new MerkleError({ code: 'IndexOutOfBounds', index: 5, len: 3 })
+console.assert(err.message === 'index 5 is out of bounds for a tree with 3 leaves')
+console.assert(new MerkleError({ code: 'EmptyLeafData' }).message === 'leaf data must not be empty')
+```
+
+</TypeScript>
+
+## Generic error handling
+
+<Rust>
+
+`MerkleError` implements `std::error::Error`, so it converts into `Box<dyn Error>` with `?`:
 
 ```rust
 use std::error::Error;
@@ -93,3 +206,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 ```
+
+</Rust>
+
+<TypeScript>
+
+Because `MerkleError` extends `Error`, code that only handles errors generically needs nothing
+MerkleForge-specific:
+
+```ts
+import { MerkleError, utf8 } from '@merkleforge/core'
+import { Keccak256 } from '@merkleforge/hash'
+import { MerklePatriciaTrie } from '@merkleforge/variants'
+
+const trie = new MerklePatriciaTrie(Keccak256)
+trie.insert(utf8('key'), utf8('value'))
+
+// Removing a key that isn't there is an error.
+try {
+  trie.remove(utf8('missing'))
+} catch (error) {
+  console.assert(error instanceof MerkleError && error instanceof Error)
+  console.log(`${error}`)
+}
+```
+
+This prints
+`MerkleError: operation 'remove missing Patricia key' is not supported for this tree variant`.
+
+</TypeScript>

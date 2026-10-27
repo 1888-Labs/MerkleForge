@@ -1,6 +1,6 @@
 ---
 title: Why MerkleForge
-description: The problem MerkleForge solves and how it approaches authenticated data in Rust.
+description: The problem MerkleForge solves and how it approaches authenticated data in Rust and TypeScript.
 ---
 
 # Why MerkleForge
@@ -64,6 +64,14 @@ All three are generic over a [`HashFunction`](/docs/guides/hash-functions), impl
 The hash crate is published as `merkleforge-hash` (the original name was taken) and imported in
 Rust as `merkleforge_hash`. In the repository it lives in the `merkle-hash/` folder.
 :::
+
+## TypeScript
+
+The same trees, hashes, and proof formats are available on npm as
+[`@merkleforge/*`](https://www.npmjs.com/org/merkleforge) packages. Roots and proofs match the Rust
+crates byte for byte, so a Rust server can prove and a browser can verify. Every guide shows both
+languages: pick one with the **Rust / TypeScript** switch in the sidebar. See
+[TypeScript packages](/docs/reference/typescript) for the package list and how the APIs map.
 
 :::warning
 MerkleForge has **not** completed an independent security audit. Review the code against your

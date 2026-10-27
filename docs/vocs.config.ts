@@ -71,6 +71,12 @@ export default defineConfig({
         innerHTML:
           "(function(){try{if(!localStorage.getItem('vocs-theme')){var e=document.documentElement;e.setAttribute('data-vocs-theme','dark');e.style.colorScheme='dark'}}catch(e){}})()",
       },
+      {
+        // Rust / TypeScript switch (components/Lang.tsx): apply `?lang=` or the
+        // saved choice before paint, so the right code shows without a flash.
+        innerHTML:
+          "(function(){var l='rust';try{var q=new URLSearchParams(location.search).get('lang');if(q==='ts'||q==='typescript')l='ts';else if(q!=='rust'&&localStorage.getItem('mf-lang')==='ts')l='ts';if(q)localStorage.setItem('mf-lang',l)}catch(e){}document.documentElement.setAttribute('data-mf-lang',l)})()",
+      },
     ],
   },
   editLink: {
@@ -128,6 +134,7 @@ export default defineConfig({
         text: 'Reference',
         items: [
           { text: 'API overview', link: '/docs/reference/api' },
+          { text: 'TypeScript packages', link: '/docs/reference/typescript' },
           { text: 'Changelog', link: '/docs/reference/changelog' },
           { text: 'Security', link: '/docs/reference/security' },
           { text: 'Brand assets', link: '/docs/reference/brand' },
