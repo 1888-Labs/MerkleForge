@@ -1,8 +1,3 @@
 target/
 __pycache__/
 *.pyc
-_site/
-docs/node_modules/
-docs/dist/
-docs/public/benchmark-data.json
-docs/public/site-data.json

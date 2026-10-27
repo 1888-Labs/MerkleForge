@@ -1,0 +1,128 @@
+# API overview
+
+This page maps the public API of each crate. For full signatures and doc comments, see docs.rs.
+
+| Crate | Import as | docs.rs |
+| --- | --- | --- |
+| `merkle-core` | `merkle_core` | [docs.rs/merkle-core](https://docs.rs/merkle-core) |
+| `merkleforge-hash` | `merkleforge_hash` | [docs.rs/merkleforge-hash](https://docs.rs/merkleforge-hash) |
+| `merkle-variants` | `merkle_variants` | [docs.rs/merkle-variants](https://docs.rs/merkle-variants) |
+
+:::note
+docs.rs shows the latest **published** release (0.4.1). Items marked *Unreleased* below are in the
+repository but not yet on crates.io.
+:::
+
+## merkle-core
+
+Traits, types, and errors shared by every crate. `no_std` + `alloc` capable
+([details](/docs/guides/no-std)).
+
+### `merkle_core::prelude`
+
+Re-exports `MerkleError`, `HashFunction`, `MerkleTree`, `ProofVerifier`, `Serializable`,
+`LeafIndex`, `MerkleProof`, `NodeIndex`, `ProofNode`, `ProofSide`, and `TreeMetadata`.
+
+```rust
+use merkle_core::prelude::*;
+
+fn main() {
+    let index = LeafIndex(3);
+    assert_eq!(index.value(), 3);
+    assert_eq!(NodeIndex::from(index), NodeIndex(3));
+    assert_eq!(NodeIndex::root(4), NodeIndex(6)); // [L0 L1 L2 L3 P01 P23 Root]
+}
+```
+
+### Traits (`merkle_core::traits`)
+
+| Trait | Methods |
+| --- | --- |
+| [`HashFunction`](https://docs.rs/merkle-core/latest/merkle_core/traits/hash_function/trait.HashFunction.html) | `type Digest`; `hash`, `algorithm_name`, `digest_size`; provided `hash_nodes`, `hash_encoded_node` (*Unreleased*), `empty` |
+| [`MerkleTree<H>`](https://docs.rs/merkle-core/latest/merkle_core/traits/merkle_tree/trait.MerkleTree.html) | `insert`, `remove`, `root`, `leaf_count`, `is_empty`, `height`, `generate_proof`, `metadata` |
+| [`ProofVerifier<H>`](https://docs.rs/merkle-core/latest/merkle_core/traits/merkle_tree/trait.ProofVerifier.html) | `verify(expected_root, leaf_data, proof) -> bool` |
+| [`Serializable`](https://docs.rs/merkle-core/latest/merkle_core/traits/serializable/trait.Serializable.html) | `to_bytes`, `from_bytes`, `serialized_size`; blanket impl for `Serialize + DeserializeOwned` |
+
+### Types (`merkle_core::types`)
+
+| Type | Description |
+| --- | --- |
+| `LeafIndex(pub usize)` | Index into the leaf layer. `value()`, `to_node_index()` |
+| `NodeIndex(pub usize)` | Index into a flat node array. `value()`, `root(leaf_count)` |
+| `ProofSide` | `Left` or `Right`: where the sibling sits |
+| `ProofNode<D>` | `hash: D`, `side: ProofSide` |
+| `MerkleProof<D>` | `leaf_index`, `leaf_count`, `path: Vec<ProofNode<D>>`; `depth()`, `is_trivial()` |
+| `TreeMetadata` | `leaf_count`, `height`, `node_count`, `hash_algorithm`, `variant` |
+
+### Errors (`merkle_core::error`)
+
+`MerkleError`, a `#[non_exhaustive]` enum. See [Errors](/docs/guides/errors).
+
+## merkleforge-hash
+
+| Item | Description |
+| --- | --- |
+| [`Sha256`](https://docs.rs/merkleforge-hash/latest/merkleforge_hash/struct.Sha256.html) | SHA-256 with `0x00`/`0x01` domain prefixes |
+| [`Keccak256`](https://docs.rs/merkleforge-hash/latest/merkleforge_hash/struct.Keccak256.html) | Keccak-256 with `0x00`/`0x01` prefixes; plain Keccak for Patricia nodes |
+| [`Blake3`](https://docs.rs/merkleforge-hash/latest/merkleforge_hash/struct.Blake3.html) | BLAKE3 `derive_key` with leaf and internal-node contexts |
+| `HashFunction` | Re-export of `merkle_core::traits::HashFunction` |
+
+All three are zero-sized, `Copy`, and produce `[u8; 32]`. See [Hash functions](/docs/guides/hash-functions).
+
+## merkle-variants
+
+Top-level re-exports: `BinaryMerkleTree`, `SparseMerkleTree`, `MerklePatriciaTrie`, `MptProof`.
+
+### `binary` — [`BinaryMerkleTree<H>`](https://docs.rs/merkle-variants/latest/merkle_variants/binary/struct.BinaryMerkleTree.html)
+
+| Method | Notes |
+| --- | --- |
+| `new()`, `with_capacity(n)`, `Default` | Empty tree |
+| `from_leaves(iter)` | One-pass `O(n)` build (*Unreleased*) |
+| `insert(&[u8]) -> Result<LeafIndex>` | Append a leaf |
+| `remove(LeafIndex)` | Replace with `H::empty()` |
+| `root()`, `leaf_count()`, `is_empty()`, `height()` | Queries |
+| `generate_proof(LeafIndex) -> Result<MerkleProof>` | Inclusion proof |
+| `verify(root, leaf, &proof) -> bool` | Stateless, associated function |
+
+Implements `MerkleTree<H>`, `ProofVerifier<H>`; `Clone`, `Debug`, `Serialize`, `Deserialize`
+(*Unreleased*). Guide: [Binary Merkle tree](/docs/guides/binary-merkle-tree).
+
+### `sparse` — [`SparseMerkleTree<H>`](https://docs.rs/merkle-variants/latest/merkle_variants/sparse/struct.SparseMerkleTree.html)
+
+| Method | Notes |
+| --- | --- |
+| `new()`, `Default` | Empty 256-depth tree |
+| `insert(key, &[u8])`, `batch_insert(&[(key, Vec<u8>)])` | Insert or overwrite |
+| `remove(key)`, `batch_remove(&[key])` | Remove existing keys |
+| `get(key) -> Option<&Digest>` | Stored leaf hash |
+| `generate_membership_proof(key) -> Result<SparseMerkleProof>` | Membership or non-membership |
+| `verify_membership(root, key, leaf, &proof)` | Checks key, value, path (*Unreleased*) |
+| `verify_non_membership(root, key, &proof)` | Absence proof |
+| `verify(root, leaf, &proof)` | **Deprecated**: doesn't check the key |
+| `root()`, `empty_root()`, `leaf_count()`, `is_empty()`, `height()`, `depth()` | Queries |
+| `empty_hash_at(level)`, `empty_hashes()` | Empty-subtree cache |
+| `stored_node_count()`, `last_node_access_count()`, `unbatched_node_count_estimate()` | Storage introspection |
+
+Also: `SparseMerkleProof<D>` (`key`, `siblings`, `leaf`; `is_membership()`,
+`is_non_membership()`), `NodeEntry<D>` (with `commitment()`, *Unreleased*), `SubtreeBatch<D>`,
+`bit_at`, and the constants `SPARSE_TREE_DEPTH`, `EMPTY_HASH_LEVELS`, `BATCH_DEPTH`. Guide:
+[Sparse Merkle tree](/docs/guides/sparse-merkle-tree).
+
+### `patricia` — [`MerklePatriciaTrie<H>`](https://docs.rs/merkle-variants/latest/merkle_variants/patricia/struct.MerklePatriciaTrie.html)
+
+| Method | Notes |
+| --- | --- |
+| `new()`, `Default` | Empty trie |
+| `insert(key, value)`, `remove(key)`, `get(key) -> Option<&[u8]>` | Key-value operations |
+| `generate_proof(key) -> Result<MptProof>` | RLP witness, membership or non-membership |
+| `verify_proof(root, &proof) -> bool` | Stateless |
+| `root()`, `is_empty()`, `leaf_count()`, `node_count()`, `height()` | Queries |
+
+Also: `MptProof<D>` (`key`, `value`, `proof_nodes`; `new`, `is_membership`, `is_non_membership`),
+`MptNode<D>`, `NodeRef<D>`, `NibblePath`, `hp_encode`, `hp_decode`, `rlp_encode`, `rlp_decode`,
+`hash_node`, `compute_root_hash`. Guide: [Merkle Patricia trie](/docs/guides/merkle-patricia-trie).
+
+## Safety
+
+Every published crate uses `#![forbid(unsafe_code)]` and `#![deny(missing_docs)]`.

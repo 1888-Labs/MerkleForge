@@ -12,7 +12,7 @@ import prepare_release
 class UpdateDependencyVersionsTests(unittest.TestCase):
     def bump(self, text: str) -> str:
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "page.mdx"
+            path = Path(tmp) / "README.md"
             path.write_text(text)
             prepare_release.update_dependency_versions([path], "0.5.0")
             return path.read_text()
@@ -24,8 +24,6 @@ class UpdateDependencyVersionsTests(unittest.TestCase):
             'merkle-variants = "0.4.1"\n'
             'merkle-core = { version = "0.4.1", default-features = false, features = ["alloc"] }\n'
             'merkleforge-hash = { path = "merkle-hash", version = "0.4.1" }\n'
-            '<div className="mf-badge"><span>version</span><span>0.4.1</span></div>\n'
-            '<div className="mf-badge"><span>version</span><span>v0.4.1</span></div>\n'
         )
         self.assertEqual(self.bump(text), text.replace("0.4.1", "0.5.0"))
 

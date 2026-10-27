@@ -1,0 +1,30 @@
+# MerkleForge
+
+Authenticated data structures for Rust: Binary, Sparse, and Ethereum-compatible Patricia Merkle trees behind one API, with pluggable hashes and stateless proofs.
+
+- [Why MerkleForge](/docs/): The problem MerkleForge solves and how it approaches authenticated data in Rust.
+- [Getting started](/docs/getting-started): Install MerkleForge and build, prove, and verify your first Merkle tree.
+- [Mental model](/docs/mental-model): Leaves, roots, proofs, and verifiers, and why MerkleForge separates leaf and node hashes.
+- [Choosing a tree](/docs/guides/choosing-a-tree): Which MerkleForge tree variant fits your data, and how to write code that works with all of them.
+- [Binary Merkle tree](/docs/guides/binary-merkle-tree): Build, update, prove, and verify with BinaryMerkleTree.
+- [Sparse Merkle tree](/docs/guides/sparse-merkle-tree): Key-addressed state with membership and non-membership proofs and batch updates.
+- [Merkle Patricia trie](/docs/guides/merkle-patricia-trie): Ethereum-compatible state roots and RLP witnesses with MerklePatriciaTrie.
+- [Hash functions](/docs/guides/hash-functions): The SHA-256, Keccak-256, and BLAKE3 adapters, domain separation, and writing your own HashFunction.
+- [Proofs & stateless verification](/docs/guides/proofs): Proof types, the ProofVerifier trait, and a server/light-client example.
+- [Serialization](/docs/guides/serialization): Store and transmit proofs and trees with the Serializable trait, bincode, or any serde format.
+- [Metadata](/docs/guides/metadata): Inspect tree size, height, node count, hash algorithm, and variant with TreeMetadata.
+- [Errors](/docs/guides/errors): MerkleError variants, when each one occurs, and how to handle them.
+- [no_std](/docs/guides/no-std): Using merkle-core in no_std + alloc environments.
+- [Benchmarks](/docs/performance/benchmarks): Published Criterion results for hashes, tree variants, and other Rust Merkle libraries, and how to reproduce them.
+- [Profiling & energy](/docs/performance/profiling): Flamegraphs, hardware counters, and energy measurements for MerkleForge workloads.
+- [API overview](/docs/reference/api): The public API of merkle-core, merkleforge-hash, and merkle-variants, with links to docs.rs.
+- [Changelog](/docs/reference/changelog): Release history for the MerkleForge crates.
+- [Security](/docs/reference/security): Audit status, how to report vulnerabilities, and what verifiers must trust.
+- [Brand assets](/docs/reference/brand): The MerkleForge mark, lockups, colours, type, and usage rules.
+- [Contributing](/docs/community/contributing): How to set up the workspace, run the checks, and open a good pull request.
+- [Code of Conduct](/docs/community/code-of-conduct): The MerkleForge community Code of Conduct (Contributor Covenant 2.1).
+- [Projects using MerkleForge](/docs/community/projects): Open-source projects built on MerkleForge.
+- [MerkleForge · Authenticated data structures for Rust](/index): Binary, Sparse, and Ethereum-compatible Patricia Merkle trees behind one Rust API, with pluggable hashes and stateless proofs.
+- [Benchmarks](/benchmarks): Live Criterion results for MerkleForge hash adapters and tree variants, plus library comparisons.
+- [Live demo](/demo): Build a SHA-256 Merkle tree in your browser, prove a row, and verify it statelessly.
+- [Examples](/examples): Copy-pasteable MerkleForge programs for binary proofs, sparse state, Patricia witnesses, hashing, metadata, and proof transport.
