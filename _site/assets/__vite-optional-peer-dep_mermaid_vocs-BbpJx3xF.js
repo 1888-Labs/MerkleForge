@@ -1,1 +1,0 @@
-var e={};throw Error(`Could not resolve "mermaid" imported by "vocs". Is it installed?`);export{e as default};
