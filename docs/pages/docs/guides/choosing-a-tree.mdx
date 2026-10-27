@@ -3,15 +3,19 @@ title: Choosing a tree
 description: Which MerkleForge tree variant fits your data, and how to write code that works with all of them.
 ---
 
+import { LangBar, Rust, TypeScript } from '../../../components/Lang'
+
 # Choosing a tree
 
-MerkleForge ships three tree variants. They share the `MerkleTree<H>` trait but are built for
+MerkleForge ships three tree variants. They share the <Rust inline>`MerkleTree<H>` trait</Rust><TypeScript inline>`MerkleTree` interface</TypeScript> but are built for
 different shapes of data.
+
+<LangBar />
 
 | | `BinaryMerkleTree<H>` | `SparseMerkleTree<H>` | `MerklePatriciaTrie<H>` |
 | --- | --- | --- | --- |
 | **Data shape** | Ordered list | Map from 32-byte keys to values | Map from byte keys to values |
-| **Addressed by** | `LeafIndex` | `[u8; 32]` key | `&[u8]` key |
+| **Addressed by** | <Rust inline>`LeafIndex`</Rust><TypeScript inline>`number` index</TypeScript> | 32-byte key | Byte-string key |
 | **Proofs** | Inclusion | Membership and non-membership | Membership and non-membership (RLP witness) |
 | **Proof size** | `⌈log₂ n⌉` siblings | 256 siblings, empty ones compressed to `None` | One RLP node per trie level on the path |
 | **Best hash** | `Sha256` or `Blake3` | `Sha256` or `Blake3` | `Keccak256` for Ethereum roots |
@@ -30,8 +34,10 @@ different shapes of data.
 
 ## Writing code that works with any variant
 
-The shared trait lets you write generic code. Each variant also has a native API (keys for the
-sparse tree and trie); the trait maps leaf indices onto it.
+The shared <Rust inline>trait</Rust><TypeScript inline>interface</TypeScript> lets you write generic code. Each variant also has a native API (keys
+for the sparse tree and trie); the <Rust inline>trait</Rust><TypeScript inline>interface</TypeScript> maps leaf indices onto it.
+
+<Rust>
 
 ```rust
 use merkle_core::prelude::*;
@@ -64,19 +70,51 @@ fn main() -> Result<(), MerkleError> {
 }
 ```
 
-### How the trait maps onto each variant
+</Rust>
 
-- **Binary:** `insert` appends and returns the next `LeafIndex`. `remove` replaces the leaf with
-  `H::empty()`; later indices are unchanged.
+<TypeScript>
+
+The sparse tree and trie implement `MerkleTree` through an `indexed()` view that shares the tree's
+state:
+
+```ts
+import { type Bytes, type MerkleTree, type TreeMetadata, utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree, MerklePatriciaTrie, SparseMerkleTree } from '@merkleforge/variants'
+
+/** Insert rows through the shared interface and return a metadata snapshot. */
+function commit(tree: MerkleTree, rows: Bytes[]): TreeMetadata {
+  for (const row of rows) tree.insert(row)
+  return tree.metadata()
+}
+
+const rows = ['alice:100', 'bob:250', 'carol:75'].map(utf8)
+
+const binary = commit(new BinaryMerkleTree(Sha256), rows)
+const sparse = commit(new SparseMerkleTree(Sha256).indexed(), rows)
+const trie = commit(new MerklePatriciaTrie(Sha256).indexed(), rows)
+
+for (const meta of [binary, sparse, trie]) {
+  console.log(`${meta.variant.padEnd(18)} leaves=${meta.leafCount} height=${meta.height}`)
+}
+```
+
+</TypeScript>
+
+### How the shared interface maps onto each variant
+
+- **Binary:** `insert` appends and returns the next index. `remove` replaces the leaf with
+  <Rust inline>`H::empty()`</Rust><TypeScript inline>`hasher.empty()`</TypeScript>; later indices are unchanged.
 - **Sparse:** leaf index `i` is stored at a key whose last 8 bytes are `i` in big-endian order.
   `insert` returns the first unoccupied index at or above the leaf count, so it never overwrites a
-  leaf after a removal. `generate_proof` returns a `MerkleProof` with 256 path nodes.
-- **Patricia:** leaf index `i` is stored under the key `b"merkleforge:mpt:trait-leaf:" ‖ i`
-  (8 bytes, big-endian). `generate_proof` through the trait returns
-  `MerkleError::UnsupportedOperation`, because Patricia proofs are key-addressed. Use
-  `MerklePatriciaTrie::generate_proof(key)` instead.
+  leaf after a removal. <Rust inline>`generate_proof`</Rust><TypeScript inline>`generateProof`</TypeScript> returns a `MerkleProof` with 256 path nodes.
+- **Patricia:** leaf index `i` is stored under the key `merkleforge:mpt:trait-leaf: ‖ i`
+  (8 bytes, big-endian). <Rust inline>`generate_proof` through the trait returns
+  `MerkleError::UnsupportedOperation`</Rust><TypeScript inline>`generateProof` through the view throws
+  `MerkleError` with code `'UnsupportedOperation'`</TypeScript>, because Patricia proofs are key-addressed. Use
+  <Rust inline>`MerklePatriciaTrie::generate_proof(key)`</Rust><TypeScript inline>`trie.generateProof(key)`</TypeScript> instead.
 
 :::tip
-Use the trait for generic plumbing (ingestion, metadata, benchmarks). Use each variant's native API
+Use the <Rust inline>trait</Rust><TypeScript inline>interface</TypeScript> for generic plumbing (ingestion, metadata, benchmarks). Use each variant's native API
 when you need key-addressed proofs.
 :::

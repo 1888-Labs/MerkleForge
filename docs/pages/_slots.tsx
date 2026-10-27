@@ -1,6 +1,7 @@
 'use client'
 
 import { useRouter } from 'waku'
+import { LangSwitch } from '../components/Lang'
 import { OwnerCredit, owner } from '../components/Owner'
 
 /** Site-wide footer crediting 1888 Labs. The landing page renders its own. */
@@ -17,6 +18,10 @@ export function Footer() {
   )
 }
 
-// Unused slots, exported so Vocs doesn't warn about missing exports.
+/** Rust / TypeScript switch at the top of the docs sidebar. */
+export function SidebarHeader() {
+  return <LangSwitch />
+}
+
+// Unused slot, exported so Vocs doesn't warn about a missing export.
 export const OutlineFooter = undefined
-export const SidebarHeader = undefined

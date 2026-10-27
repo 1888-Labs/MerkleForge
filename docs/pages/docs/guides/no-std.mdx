@@ -3,7 +3,23 @@ title: no_std
 description: Using merkle-core in no_std + alloc environments.
 ---
 
+import { LangBar, Rust, TypeScript } from '../../../components/Lang'
+
 # no_std
+
+<LangBar />
+
+<TypeScript>
+
+:::info
+This page is about the Rust crates. The TypeScript packages have no `std` / `no_std` split: they are
+plain ESM with one runtime dependency ([`@noble/hashes`](https://github.com/paulmillr/noble-hashes))
+and run unchanged in Node.js, browsers, Deno, Bun, and edge or worker runtimes. To verify proofs on
+a constrained device, use the Rust crates below, or verify on-chain with the Solidity verifiers in
+[MerkleForge-ts/contracts](https://github.com/1888-Labs/MerkleForge-ts/tree/main/contracts).
+:::
+
+</TypeScript>
 
 `merkle-core`, the crate with the traits, proof types, and errors, supports `no_std` targets with
 a global allocator. That lets embedded devices, enclaves, and WebAssembly modules share proof types

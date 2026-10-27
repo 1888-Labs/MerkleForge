@@ -668,3 +668,69 @@ a.mf-stat:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ── Rust / TypeScript language switch (components/Lang.tsx) ─────────── */
+
+/* The selected language is set on <html> before paint; hide the other one. */
+:root[data-mf-lang='ts'] .mf-lang-rust,
+:root:not([data-mf-lang='ts']) .mf-lang-ts {
+  display: none;
+}
+
+.mf-lang-switch {
+  display: inline-flex;
+  width: 100%;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid var(--vocs-border-color-primary);
+  border-radius: 8px;
+  background: light-dark(#fafafa, #0a0a0a);
+}
+
+.mf-lang-switch button {
+  flex: 1;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: light-dark(#5c5c5c, #a3a3a3);
+  font-family: var(--vocs-font-family);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.mf-lang-switch button:hover {
+  color: light-dark(#000000, #ffffff);
+}
+
+.mf-lang-switch button[data-active] {
+  background: light-dark(#000000, #ffffff);
+  color: light-dark(#ffffff, #000000);
+}
+
+.mf-lang-switch button:focus-visible {
+  outline: 2px solid light-dark(#000000, #ffffff);
+  outline-offset: 2px;
+}
+
+/* In-page bar for narrow screens; wide screens use the sidebar control. */
+.mf-lang-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0 24px;
+  font-size: 14px;
+  color: light-dark(#5c5c5c, #a3a3a3);
+}
+
+.mf-lang-bar .mf-lang-switch {
+  width: auto;
+}
+
+@media (width >= 1024px) {
+  .mf-lang-bar:not([data-always]) {
+    display: none;
+  }
+}

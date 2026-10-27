@@ -3,20 +3,24 @@ title: Mental model
 description: Leaves, roots, proofs, and verifiers, and why MerkleForge separates leaf and node hashes.
 ---
 
+import { LangBar, Rust, TypeScript } from '../../components/Lang'
+
 # Mental model
 
 Think of a Merkle root as a **fingerprint for many values**. Change any value and the fingerprint
 changes. A proof is the short path that lets another machine check one value against that
 fingerprint.
 
+<LangBar />
+
 ## The four pieces
 
 | Piece | What it is | In MerkleForge |
 | --- | --- | --- |
-| **Leaf** | The hash of one value you inserted. | `H::hash(data)`, computed for you by `insert`. |
-| **Root** | One digest that commits to every leaf. | `tree.root()` returns `Option<&H::Digest>`. |
-| **Proof** | The sibling hashes on the path from one leaf to the root. | `MerkleProof<D>` (binary), `SparseMerkleProof<D>`, `MptProof<D>`. |
-| **Verifier** | Code that rebuilds the root from a leaf and a proof. | `ProofVerifier::verify` and the per-tree `verify*` functions. |
+| **Leaf** | The hash of one value you inserted. | <Rust inline>`H::hash(data)`</Rust><TypeScript inline>`hasher.hash(data)`</TypeScript>, computed for you by `insert`. |
+| **Root** | One digest that commits to every leaf. | `tree.root()` returns <Rust inline>`Option<&H::Digest>`</Rust><TypeScript inline>`Uint8Array` or `undefined`</TypeScript>. |
+| **Proof** | The sibling hashes on the path from one leaf to the root. | <Rust inline>`MerkleProof<D>` (binary), `SparseMerkleProof<D>`, `MptProof<D>`</Rust><TypeScript inline>`MerkleProof` (binary), `SparseMerkleProof`, `MptProof`</TypeScript>. |
+| **Verifier** | Code that rebuilds the root from a leaf and a proof. | <Rust inline>`ProofVerifier::verify` and the per-tree `verify*` functions</Rust><TypeScript inline>The static `verify*` functions on each tree class</TypeScript>. |
 
 ```text
                  root = H(0x01 ‖ n01 ‖ n23)
@@ -62,6 +66,8 @@ separation from BLAKE3's `derive_key` mode with two context strings. See
 Nothing in a proof is magic. This program rebuilds the root manually and checks it against the
 library's own verifier:
 
+<Rust>
+
 ```rust
 use merkle_core::prelude::*;
 use merkle_variants::BinaryMerkleTree;
@@ -88,22 +94,49 @@ fn main() -> Result<(), MerkleError> {
 }
 ```
 
-`ProofSide::Left` means the sibling sits on the left, so it goes first in the concatenation.
+</Rust>
+
+<TypeScript>
+
+```ts
+import { bytesEqual, utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+const tree = BinaryMerkleTree.fromLeaves(Sha256, ['a', 'b', 'c', 'd'].map(utf8))
+const root = tree.root()!
+const proof = tree.generateProof(0)
+
+// 1. current = H(0x00 ‖ leaf)
+let current = Sha256.hash(utf8('a'))
+// 2. Walk the siblings from the leaf level up to the root.
+for (const node of proof.path) {
+  current =
+    node.side === 'left' ? Sha256.hashNodes(node.hash, current) : Sha256.hashNodes(current, node.hash)
+}
+// 3. Compare with the trusted root.
+console.assert(bytesEqual(current, root))
+console.assert(BinaryMerkleTree.verify(Sha256, root, utf8('a'), proof))
+```
+
+</TypeScript>
+
+<Rust inline>`ProofSide::Left`</Rust><TypeScript inline>`side: 'left'`</TypeScript> means the sibling sits on the left, so it goes first in the concatenation.
 
 ## Padding and empty slots
 
-- `BinaryMerkleTree` pads the leaf layer to the next power of two with `H::empty()`, the hash of an
-  empty leaf. Five leaves become eight slots.
+- `BinaryMerkleTree` pads the leaf layer to the next power of two with <Rust inline>`H::empty()`</Rust><TypeScript inline>`hasher.empty()`</TypeScript>,
+  the hash of an empty leaf. Five leaves become eight slots.
 - `SparseMerkleTree` has 2²⁵⁶ slots and precomputes the root of an empty subtree at every level,
   so empty regions cost nothing to store.
 - `MerklePatriciaTrie` follows Ethereum's node layout and has no padding.
 
-Because empty slots hash to `H::empty()`, **empty leaf data is rejected** with
-`MerkleError::EmptyLeafData`; otherwise an inserted empty value would be indistinguishable from
+Because empty slots hash to <Rust inline>`H::empty()`</Rust><TypeScript inline>`hasher.empty()`</TypeScript>, **empty leaf data is rejected** with
+<Rust inline>`MerkleError::EmptyLeafData`</Rust><TypeScript inline>a `MerkleError` with code `'EmptyLeafData'`</TypeScript>; otherwise an inserted empty value would be indistinguishable from
 padding.
 
-## One caveat: `leaf_count` is not committed
+## One caveat: the leaf count is not committed
 
-`MerkleProof::leaf_count` tells the verifier how deep the path should be. The root does **not**
+<Rust inline>`MerkleProof::leaf_count`</Rust><TypeScript inline>`MerkleProof.leafCount`</TypeScript> tells the verifier how deep the path should be. The root does **not**
 commit to it, so any count with the same padded size verifies. If the exact number of leaves matters
 to you, get it from a trusted source and compare.

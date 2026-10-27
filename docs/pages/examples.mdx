@@ -1,10 +1,16 @@
 ---
 title: Examples
-description: Copy-pasteable MerkleForge programs for binary proofs, sparse state, Patricia witnesses, hashing, metadata, and proof transport.
+description: Copy-pasteable MerkleForge programs in Rust and TypeScript for binary proofs, sparse state, Patricia witnesses, hashing, metadata, and proof transport.
 layout: minimal
 ---
 
+import { LangBar, Rust, TypeScript } from '../components/Lang'
+
 # Examples
+
+<LangBar always />
+
+<Rust>
 
 Complete programs you can paste into `src/main.rs`. Each one compiles against the current
 crates; add the dependencies first:
@@ -21,10 +27,25 @@ Examples that use `BinaryMerkleTree::from_leaves` or tree serialization need v0.
 Everything else also works with v0.4.x.
 :::
 
+</Rust>
+
+<TypeScript>
+
+Complete programs you can paste into `index.ts` and run with `npx tsx index.ts` (or `node index.ts`
+on Node.js 23.6+). Install the packages first:
+
+```bash
+npm i @merkleforge/core @merkleforge/hash @merkleforge/variants
+```
+
+</TypeScript>
+
 ## Binary inclusion proof
 
 Build a tree, prove one leaf, and verify it with only the root, the proof, and the leaf bytes.
 [Guide](/docs/guides/binary-merkle-tree)
+
+<Rust>
 
 ```rust [src/main.rs]
 use merkle_core::types::LeafIndex;
@@ -48,10 +69,33 @@ fn main() -> Result<(), merkle_core::error::MerkleError> {
 }
 ```
 
+</Rust>
+
+<TypeScript>
+
+```ts [index.ts]
+import { utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+const tree = new BinaryMerkleTree(Sha256)
+tree.insert(utf8('alice:100'))
+tree.insert(utf8('bob:250'))
+
+const proof = tree.generateProof(0)
+const root = tree.root()!
+
+console.assert(BinaryMerkleTree.verify(Sha256, root, utf8('alice:100'), proof))
+```
+
+</TypeScript>
+
 ## Sparse account state
 
 Commit balances under 32-byte keys and prove one account's value.
 [Guide](/docs/guides/sparse-merkle-tree)
+
+<Rust>
 
 ```rust [src/main.rs]
 use merkle_variants::SparseMerkleTree;
@@ -83,9 +127,40 @@ fn main() -> Result<(), merkle_core::error::MerkleError> {
 }
 ```
 
+</Rust>
+
+<TypeScript>
+
+```ts [index.ts]
+import { utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { SparseMerkleTree } from '@merkleforge/variants'
+
+const state = new SparseMerkleTree(Sha256)
+const alice = new Uint8Array(32).fill(7)
+const bob = new Uint8Array(32).fill(9)
+
+state.insert(alice, utf8('balance:100'))
+state.insert(bob, utf8('balance:250'))
+
+const proof = state.generateMembershipProof(alice)
+const root = state.root()!
+
+console.assert(SparseMerkleTree.verifyMembership(Sha256, root, alice, utf8('balance:100'), proof))
+
+// Prove that a key is absent.
+const carol = new Uint8Array(32).fill(11)
+const absent = state.generateMembershipProof(carol)
+console.assert(SparseMerkleTree.verifyNonMembership(Sha256, root, carol, absent))
+```
+
+</TypeScript>
+
 ## Patricia witness
 
 Ethereum-style key-value state with an RLP witness. [Guide](/docs/guides/merkle-patricia-trie)
+
+<Rust>
 
 ```rust [src/main.rs]
 use merkle_variants::MerklePatriciaTrie;
@@ -108,9 +183,36 @@ fn main() -> Result<(), merkle_core::error::MerkleError> {
 }
 ```
 
+</Rust>
+
+<TypeScript>
+
+```ts [index.ts]
+import { bytesEqual, utf8 } from '@merkleforge/core'
+import { Keccak256 } from '@merkleforge/hash'
+import { MerklePatriciaTrie } from '@merkleforge/variants'
+
+const trie = new MerklePatriciaTrie(Keccak256)
+
+trie.insert(utf8('account:alice'), utf8('100'))
+trie.insert(utf8('account:bob'), utf8('250'))
+
+const proof = trie.generateProof(utf8('account:alice'))
+const root = trie.root()!
+
+console.assert(bytesEqual(proof.key, utf8('account:alice')))
+console.assert(proof.value !== null && bytesEqual(proof.value, utf8('100')))
+console.log(`witness has ${proof.proofNodes.length} RLP nodes`)
+console.assert(MerklePatriciaTrie.verifyProof(Keccak256, root, proof))
+```
+
+</TypeScript>
+
 ## Swap the hash function
 
 The same tree API over three algorithms. [Guide](/docs/guides/hash-functions)
+
+<Rust>
 
 ```rust [src/main.rs]
 use merkle_core::traits::MerkleTree;
@@ -135,9 +237,34 @@ fn main() -> Result<(), merkle_core::error::MerkleError> {
 }
 ```
 
+</Rust>
+
+<TypeScript>
+
+```ts [index.ts]
+import { utf8 } from '@merkleforge/core'
+import { Blake3, Keccak256, Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+const trees = [Sha256, Keccak256, Blake3].map((hasher) => new BinaryMerkleTree(hasher))
+
+for (const leaf of ['alice', 'bob', 'carol']) {
+  for (const tree of trees) tree.insert(utf8(leaf))
+}
+
+for (const tree of trees) {
+  const meta = tree.metadata()
+  console.log(`${meta.hashAlgorithm}: ${meta.leafCount} leaves, height ${meta.height}`)
+}
+```
+
+</TypeScript>
+
 ## Hash directly
 
 Use an adapter without a tree: leaf hashes, parent hashes, and metadata.
+
+<Rust>
 
 ```rust [src/main.rs]
 use merkle_core::traits::HashFunction;
@@ -154,9 +281,30 @@ fn main() {
 }
 ```
 
+</Rust>
+
+<TypeScript>
+
+```ts [index.ts]
+import { bytesEqual, utf8 } from '@merkleforge/core'
+import { Blake3 } from '@merkleforge/hash'
+
+const left = Blake3.hash(utf8('left leaf'))
+const right = Blake3.hash(utf8('right leaf'))
+const parent = Blake3.hashNodes(left, right)
+
+console.assert(!bytesEqual(parent, left))
+console.assert(Blake3.digestSize === 32)
+console.assert(Blake3.algorithmName === 'BLAKE3')
+```
+
+</TypeScript>
+
 ## Tree metadata
 
 Inspect a tree for logs and dashboards. [Guide](/docs/guides/metadata)
+
+<Rust>
 
 ```rust [src/main.rs]
 use merkle_core::traits::MerkleTree;
@@ -176,10 +324,33 @@ fn main() -> Result<(), merkle_core::error::MerkleError> {
 }
 ```
 
+</Rust>
+
+<TypeScript>
+
+```ts [index.ts]
+import { utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+const tree = BinaryMerkleTree.fromLeaves(Sha256, ['alice', 'bob', 'carol'].map(utf8))
+
+const metadata = tree.metadata()
+console.log('variant:', metadata.variant)
+console.log('algorithm:', metadata.hashAlgorithm)
+console.log('leaves:', metadata.leafCount)
+console.log('height:', metadata.height)
+console.log('allocated nodes:', metadata.nodeCount)
+```
+
+</TypeScript>
+
 ## Proof transport
 
 Serialize a proof to bytes on the server and decode it on the client.
 [Guide](/docs/guides/serialization)
+
+<Rust>
 
 ```rust [src/main.rs]
 use merkle_core::{
@@ -204,9 +375,34 @@ fn main() -> Result<(), merkle_core::error::MerkleError> {
 }
 ```
 
+</Rust>
+
+<TypeScript>
+
+```ts [index.ts]
+import { decodeMerkleProof, encodeMerkleProof, utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+// Server
+const tree = BinaryMerkleTree.fromLeaves(Sha256, ['tx1', 'tx2', 'tx3'].map(utf8))
+const root = tree.root()!
+const bytes = encodeMerkleProof(tree.generateProof(1))
+
+// ... send `root` (trusted channel) and `bytes` (any channel) ...
+
+// Client
+const proof = decodeMerkleProof(bytes)
+console.assert(BinaryMerkleTree.verify(Sha256, root, utf8('tx2'), proof))
+```
+
+</TypeScript>
+
 ## Stateless light client
 
-The repository's runnable example: the tree is dropped before verification.
+The tree is dropped before verification; only the root and the proof reach the client.
+
+<Rust>
 
 ```rust [merkle-variants/examples/light_client.rs]
 use merkle_core::{error::MerkleError, types::LeafIndex};
@@ -241,5 +437,37 @@ fn main() -> Result<(), MerkleError> {
 ```bash
 cargo run -p merkle-variants --example light_client
 ```
+
+</Rust>
+
+<TypeScript>
+
+The tree only lives inside `server()`; the client verifies with the root and proof alone.
+
+```ts [index.ts]
+import { type Bytes, type MerkleProof, utf8 } from '@merkleforge/core'
+import { Sha256 } from '@merkleforge/hash'
+import { BinaryMerkleTree } from '@merkleforge/variants'
+
+function server(): { root: Bytes; proof: MerkleProof } {
+  const tree = new BinaryMerkleTree(Sha256)
+  tree.insert(utf8('tx:alice->bob:100'))
+  tree.insert(utf8('tx:bob->carol:50'))
+  tree.insert(utf8('tx:carol->dave:25'))
+
+  console.log('server: built tree and exported root + proof')
+  return { root: tree.root()!, proof: tree.generateProof(0) }
+}
+
+// The tree goes out of scope when `server` returns; only the root and proof leave it.
+const { root, proof } = server()
+
+const valid = BinaryMerkleTree.verify(Sha256, root, utf8('tx:alice->bob:100'), proof)
+
+console.log('client: tree dropped before verification')
+console.log(`Stateless verification: ${valid}`)
+```
+
+</TypeScript>
 
 See it in the browser on the [live demo](/demo).
