@@ -1,0 +1,119 @@
+# Serialization
+
+Proofs and trees implement `serde`'s `Serialize` and `Deserialize`. On top of that, `merkle-core`
+provides the `Serializable` trait with compact binary helpers backed by
+[`bincode`](https://crates.io/crates/bincode) 2 (standard config).
+
+## The `Serializable` trait
+
+```rust
+use merkle_core::error::MerkleError;
+
+pub trait Serializable: Sized {
+    fn to_bytes(&self) -> Result<Vec<u8>, MerkleError>;
+    fn from_bytes(bytes: &[u8]) -> Result<Self, MerkleError>;
+    fn serialized_size(&self) -> Result<usize, MerkleError> {
+        Ok(self.to_bytes()?.len())
+    }
+}
+```
+
+A blanket implementation covers **every** type that is `Serialize + DeserializeOwned`, so you
+never implement it by hand. Errors map to `MerkleError::SerializationError` and
+`MerkleError::DeserializationError`.
+
+## Proofs
+
+```rust
+use merkle_core::prelude::*;
+use merkle_variants::BinaryMerkleTree;
+use merkleforge_hash::Sha256;
+
+fn main() -> Result<(), MerkleError> {
+    let tree = BinaryMerkleTree::<Sha256>::from_leaves(["alice", "bob", "carol", "dave"])?;
+    let proof = tree.generate_proof(LeafIndex(2))?;
+
+    let bytes = proof.to_bytes()?;
+    let recovered = MerkleProof::<[u8; 32]>::from_bytes(&bytes)?;
+    assert_eq!(proof, recovered);
+    println!("{} bytes", proof.serialized_size()?);
+
+    // Garbage input is an error, not a panic.
+    assert!(MerkleProof::<[u8; 32]>::from_bytes(b"not a proof").is_err());
+    Ok(())
+}
+```
+
+`SparseMerkleProof<D>` and `MptProof<D>` work the same way.
+
+## Any serde format
+
+Because the types are plain `serde` types, you can use JSON, CBOR, or anything else. With
+[`serde_json`](https://crates.io/crates/serde_json):
+
+```rust
+use merkle_variants::{SparseMerkleTree, sparse::SparseMerkleProof};
+use merkleforge_hash::Sha256;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut state = SparseMerkleTree::<Sha256>::new();
+    state.insert([7_u8; 32], b"balance:100")?;
+    let proof = state.generate_membership_proof([7_u8; 32])?;
+
+    let json = serde_json::to_string(&proof)?;
+    let decoded: SparseMerkleProof<[u8; 32]> = serde_json::from_str(&json)?;
+    assert_eq!(proof, decoded);
+    Ok(())
+}
+```
+
+:::tip
+JSON encodes `[u8; 32]` as an array of numbers. If a browser or another language verifies your
+proofs, define a small wire format with hex strings and convert at the boundary.
+:::
+
+## Trees
+
+`BinaryMerkleTree`, `SparseMerkleTree`, and `MerklePatriciaTrie` serialize compactly. The encoding
+stores only:
+
+| Tree | Stored |
+| --- | --- |
+| `BinaryMerkleTree` | Hash algorithm name + leaf hashes |
+| `SparseMerkleTree` | Hash algorithm name + `(key, leaf hash)` pairs in key order |
+| `MerklePatriciaTrie` | Hash algorithm name + `(key, value)` entries in key order |
+
+Internal nodes are **recomputed** on load, so a decoded tree is always internally consistent.
+Deserialization rejects data written with a different hash algorithm.
+
+```rust
+use merkle_core::prelude::*;
+use merkle_variants::BinaryMerkleTree;
+use merkleforge_hash::{Blake3, Sha256};
+
+fn main() -> Result<(), MerkleError> {
+    let mut tree = BinaryMerkleTree::<Sha256>::from_leaves(["alice", "bob", "carol"])?;
+    tree.remove(LeafIndex(1))?;
+
+    let bytes = tree.to_bytes()?;
+    let restored = BinaryMerkleTree::<Sha256>::from_bytes(&bytes)?;
+    assert_eq!(restored.root(), tree.root());
+    assert_eq!(restored.leaf_count(), tree.leaf_count());
+
+    // Bytes from a SHA-256 tree can't be loaded as a BLAKE3 tree.
+    assert!(BinaryMerkleTree::<Blake3>::from_bytes(&bytes).is_err());
+    Ok(())
+}
+```
+
+:::note
+Tree `Serialize` / `Deserialize` (and `Clone` / `Debug`) are new since 0.4.1 and listed under
+**Unreleased** in the changelog. Proof serialization is available in 0.4.1.
+:::
+
+## Metadata
+
+`TreeMetadata` implements `Serialize` and `Deserialize`, but its string fields are
+`&'static str`, so it can't be deserialized from an owned buffer and is **not** `Serializable`.
+Serialize it for logs and dashboards, for example with `serde_json::to_string(&tree.metadata())`.
+See [Metadata](/docs/guides/metadata).

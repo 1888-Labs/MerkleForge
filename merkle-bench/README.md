@@ -48,7 +48,7 @@ Criterion writes HTML reports to:
 target/criterion/
 ```
 
-The site build (`scripts/build_site.py`) copies those reports into the deployed GitHub Pages artifact
+The [docs site](https://github.com/1888-Labs/merkleforge-docs) build copies those reports into the deployed GitHub Pages artifact
 so the public dashboard can link to the raw Criterion output.
 
 ## Comparative Proof Sizes

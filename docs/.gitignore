@@ -1,7 +1,0 @@
-node_modules
-dist
-.vocs
-pages.gen.ts
-# Generated at deploy time by the site build script
-public/benchmark-data.json
-public/site-data.json
