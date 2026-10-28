@@ -49,11 +49,8 @@ make lint
 make test
 ```
 
-For documentation changes, also run:
-
-```bash
-npm --prefix docs run build
-```
+For changes to the documentation site, see the
+[docs contributing guide](https://github.com/1888-Labs/merkleforge-docs/blob/main/CONTRIBUTING.md).
 
 For performance changes, include before/after numbers from Criterion. See
 [BENCHMARKS.md](BENCHMARKS.md) for the commands and [profiling/](profiling/)
