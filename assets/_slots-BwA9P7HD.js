@@ -1,0 +1,1 @@
+import{n as e,t}from"./_slots-xeO2-Mz8.js";var n={Footer:t,OutlineFooter:void 0,SidebarHeader:e};export{n as export_379ac53d9642};

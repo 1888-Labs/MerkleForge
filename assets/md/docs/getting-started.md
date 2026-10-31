@@ -1,0 +1,325 @@
+# Getting started
+
+This page takes you from an empty project to a verified inclusion proof in a few minutes. MerkleForge
+ships as Rust crates and as TypeScript packages with the same trees, hashes, and byte-identical proofs.
+Pick your language with the switch in the sidebar; your choice applies to every page.
+
+<LangBar />
+
+## Requirements
+
+<Rust>
+  MerkleForge targets **Rust 1.97.1** or newer (edition 2024), the `rust-version` declared by every
+  crate. Check your toolchain with:
+
+  ```bash
+  rustc --version
+  ```
+</Rust>
+
+<TypeScript>
+  The TypeScript packages are ESM only and run on **Node.js 22** or newer, in browsers, Deno, and Bun.
+  Check your Node.js version with:
+
+  ```bash
+  node --version
+  ```
+</TypeScript>
+
+## Install
+
+::::steps
+### Create a project
+
+<Rust>
+  ```bash
+  cargo new merkle-hello
+  cd merkle-hello
+  ```
+</Rust>
+
+<TypeScript>
+  ```bash
+  mkdir merkle-hello && cd merkle-hello
+  npm init -y && npm pkg set type=module
+  ```
+</TypeScript>
+
+### Add the packages
+
+<Rust>
+  :::code-group
+  ```bash [cargo add]
+  cargo add merkle-core merkleforge-hash merkle-variants
+  ```
+
+  ```toml [Cargo.toml]
+  [dependencies]
+  merkle-core = "0.5.1"
+  merkleforge-hash = "0.5.1"
+  merkle-variants = "0.5.1"
+  ```
+  :::
+
+  Most applications want all three:
+
+  * `merkle-core` provides the traits (`MerkleTree`, `ProofVerifier`, `HashFunction`), the proof
+    types, and `MerkleError`.
+  * `merkleforge-hash` provides the `Sha256`, `Keccak256`, and `Blake3` adapters.
+  * `merkle-variants` provides the trees.
+
+  Depend on `merkle-core` alone if you are writing your own tree or hash adapter.
+</Rust>
+
+<TypeScript>
+  :::code-group
+  ```bash [npm]
+  npm i @merkleforge/core @merkleforge/hash @merkleforge/variants
+  ```
+
+  ```bash [pnpm]
+  pnpm add @merkleforge/core @merkleforge/hash @merkleforge/variants
+  ```
+
+  ```bash [yarn]
+  yarn add @merkleforge/core @merkleforge/hash @merkleforge/variants
+  ```
+
+  ```bash [bun]
+  bun add @merkleforge/core @merkleforge/hash @merkleforge/variants
+  ```
+  :::
+
+  Most applications want all three:
+
+  * `@merkleforge/core` provides the interfaces (`MerkleTree`, `HashFunction`), the proof types,
+    `MerkleError`, and byte helpers such as `utf8`, `toHex`, and `bytesEqual`.
+  * `@merkleforge/hash` provides the `Sha256`, `Keccak256`, and `Blake3` adapters.
+  * `@merkleforge/variants` provides the trees.
+
+  The other packages are optional: `@merkleforge/hash-wasm` (faster WebAssembly hashes),
+  `@merkleforge/openzeppelin` (a drop-in for `@openzeppelin/merkle-tree`), and
+  `@merkleforge/ethereum` (`eth_getProof` verification). See the [package overview](/docs/reference/typescript).
+</TypeScript>
+
+### Write your first proof
+
+<Rust>
+  Replace `src/main.rs` with:
+
+  ```rust [src/main.rs]
+  use merkle_core::prelude::*;
+  use merkle_variants::BinaryMerkleTree;
+  use merkleforge_hash::Sha256;
+
+  fn main() -> Result<(), MerkleError> {
+      let mut tree = BinaryMerkleTree::<Sha256>::new();
+
+      tree.insert(b"alice:100")?;
+      tree.insert(b"bob:250")?;
+      tree.insert(b"carol:75")?;
+
+      let root = tree.root().expect("tree is non-empty");
+      println!("root: {root:02x?}");
+
+      // Generate an inclusion proof for leaf 0 (alice).
+      let proof = tree.generate_proof(LeafIndex(0))?;
+      println!("proof depth: {}", proof.depth());
+
+      // Stateless verification: no tree needed, only the root, leaf bytes, and proof.
+      let valid = BinaryMerkleTree::<Sha256>::verify(root, b"alice:100", &proof);
+      assert!(valid);
+
+      // A different value for the same leaf is rejected.
+      assert!(!BinaryMerkleTree::<Sha256>::verify(root, b"alice:999", &proof));
+      Ok(())
+  }
+  ```
+</Rust>
+
+<TypeScript>
+  Create `index.ts`:
+
+  ```ts [index.ts]
+  import { proofDepth, toHex, utf8 } from '@merkleforge/core'
+  import { Sha256 } from '@merkleforge/hash'
+  import { BinaryMerkleTree } from '@merkleforge/variants'
+
+  const tree = new BinaryMerkleTree(Sha256)
+
+  tree.insert(utf8('alice:100'))
+  tree.insert(utf8('bob:250'))
+  tree.insert(utf8('carol:75'))
+
+  const root = tree.root()
+  if (!root) throw new Error('tree is non-empty')
+  console.log('root:', toHex(root))
+
+  // Generate an inclusion proof for leaf 0 (alice).
+  const proof = tree.generateProof(0)
+  console.log('proof depth:', proofDepth(proof))
+
+  // Stateless verification: no tree needed, only the root, leaf bytes, and proof.
+  const valid = BinaryMerkleTree.verify(Sha256, root, utf8('alice:100'), proof)
+  console.assert(valid)
+
+  // A different value for the same leaf is rejected.
+  console.assert(!BinaryMerkleTree.verify(Sha256, root, utf8('alice:999'), proof))
+  ```
+</TypeScript>
+
+### Run it
+
+<Rust>
+  ```bash
+  cargo run
+  ```
+</Rust>
+
+<TypeScript>
+  ```bash
+  npx tsx index.ts
+  ```
+
+  Node.js 23.6 and newer can also run it directly with `node index.ts`.
+</TypeScript>
+
+You should see the root, then `proof depth: 2` (three leaves are padded to four, so the proof has
+two sibling hashes). The root is the same in both languages:
+`0xbe8688d2a521ee5e1757a093610029e743c0f627a5d4e3fbf7f5a07962370d61`.
+::::
+
+## What just happened?
+
+1. Each <Rust inline>`insert`</Rust><TypeScript inline>`insert`</TypeScript> hashed the raw bytes
+   into a leaf, `H(0x00 ‖ data)`, and recomputed the path to the root.
+2. `root()` returned the 32-byte commitment to all three leaves.
+3. <Rust inline>`generate_proof`</Rust><TypeScript inline>`generateProof`</TypeScript> collected the
+   sibling hashes from leaf 0 up to the root.
+4. `verify` rebuilt the root from the bytes of `alice:100` and those siblings, and compared it with
+   the trusted root. It never touched the tree.
+
+That last step is the **light-client pattern**: whoever holds a trusted root can check one value
+without the dataset. The [Mental model](/docs/mental-model) page explains each piece.
+
+## Build from many leaves at once
+
+When you already have the full leaf set,
+<Rust inline>`from_leaves`</Rust><TypeScript inline>`fromLeaves`</TypeScript> builds the tree in one
+`O(n)` pass. The root, indices, and proofs are identical to sequential inserts.
+
+<Rust>
+  ```rust
+  use merkle_core::prelude::*;
+  use merkle_variants::BinaryMerkleTree;
+  use merkleforge_hash::Sha256;
+
+  fn main() -> Result<(), MerkleError> {
+      let rows = ["alice:100", "bob:250", "carol:75"];
+      let batch = BinaryMerkleTree::<Sha256>::from_leaves(rows)?;
+
+      let mut sequential = BinaryMerkleTree::<Sha256>::new();
+      for row in rows {
+          sequential.insert(row.as_bytes())?;
+      }
+
+      assert_eq!(batch.root(), sequential.root());
+      Ok(())
+  }
+  ```
+
+  :::note
+  `BinaryMerkleTree::from_leaves` was added in v0.5.0. On v0.4.x, use sequential `insert` calls.
+  :::
+</Rust>
+
+<TypeScript>
+  ```ts
+  import { bytesEqual, utf8 } from '@merkleforge/core'
+  import { Sha256 } from '@merkleforge/hash'
+  import { BinaryMerkleTree } from '@merkleforge/variants'
+
+  const rows = ['alice:100', 'bob:250', 'carol:75'].map(utf8)
+  const batch = BinaryMerkleTree.fromLeaves(Sha256, rows)
+
+  const sequential = new BinaryMerkleTree(Sha256)
+  for (const row of rows) sequential.insert(row)
+
+  console.assert(bytesEqual(batch.root()!, sequential.root()!))
+  ```
+</TypeScript>
+
+## Swap the hash function
+
+<Rust>
+  Every tree is generic over its hash. Change one type parameter and nothing else:
+
+  ```rust
+  use merkle_core::prelude::*;
+  use merkle_variants::BinaryMerkleTree;
+  use merkleforge_hash::{Blake3, Keccak256};
+
+  fn main() -> Result<(), MerkleError> {
+      let mut fast = BinaryMerkleTree::<Blake3>::new();
+      let mut evm = BinaryMerkleTree::<Keccak256>::new();
+
+      fast.insert(b"alice:100")?;
+      evm.insert(b"alice:100")?;
+
+      // Different algorithms, different roots.
+      assert_ne!(fast.root(), evm.root());
+      Ok(())
+  }
+  ```
+</Rust>
+
+<TypeScript>
+  Every tree takes its hash as a constructor argument. Pass a different one and nothing else changes:
+
+  ```ts
+  import { bytesEqual, utf8 } from '@merkleforge/core'
+  import { Blake3, Keccak256 } from '@merkleforge/hash'
+  import { BinaryMerkleTree } from '@merkleforge/variants'
+
+  const fast = new BinaryMerkleTree(Blake3)
+  const evm = new BinaryMerkleTree(Keccak256)
+
+  fast.insert(utf8('alice:100'))
+  evm.insert(utf8('alice:100'))
+
+  // Different algorithms, different roots.
+  console.assert(!bytesEqual(fast.root()!, evm.root()!))
+  ```
+</TypeScript>
+
+See [Hash functions](/docs/guides/hash-functions) for when to pick each one.
+
+## Try the light-client example
+
+<Rust>
+  The repository ships a runnable server/client split:
+
+  ```bash
+  git clone https://github.com/1888-Labs/MerkleForge.git
+  cd MerkleForge
+  cargo run -p merkle-variants --example light_client
+  ```
+
+  ```text
+  server: built tree and exported root + proof
+  client: tree dropped before verification
+  Stateless verification: true
+  ```
+</Rust>
+
+<TypeScript>
+  A runnable TypeScript version of the server/client split is on the [Examples](/examples) page.
+</TypeScript>
+
+The same flow runs in your browser on the [live demo](/demo).
+
+## Next steps
+
+* [Choosing a tree](/docs/guides/choosing-a-tree) when your data is a key-value map rather than a list.
+* [Proofs & stateless verification](/docs/guides/proofs) to ship proofs to clients.
+* [Serialization](/docs/guides/serialization) to store proofs and trees.

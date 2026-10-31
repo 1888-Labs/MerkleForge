@@ -1,0 +1,11 @@
+1:I["a649994c24a6",[],"Head",1]
+2:I["4cd9b2542026",[],"Root_client",1]
+3:"Children_UNSTABLE"
+4:I["847a2b1045ef",[],"$3",1]
+5:"ScrollRestoration"
+6:I["9b5d422c5822",[],"$5",1]
+7:I["847a2b1045ef",[],"Slot_UNSTABLE",1]
+:HL["/MerkleForge/assets/index-Ch7PGwxY.css","style"]
+:HL["/MerkleForge/assets/_root-B6UvDDeF.css","style"]
+:HL["/MerkleForge/assets/vocs-group-icons-a56b571edeb7.css","style"]
+0:{"root":[["$undefined"],["$","html",null,{"data-vocs":true,"lang":"en","style":{"colorScheme":"light dark","--vocs-color-accent":"light-dark(#000000, #ffffff)"},"suppressHydrationWarning":true,"children":[["$","head",null,{"children":[["$","meta",null,{"charSet":"utf-8"}],["$","meta",null,{"name":"viewport","content":"width=device-width, initial-scale=1"}],["$","link",null,{"rel":"stylesheet","href":"/MerkleForge/assets/index-Ch7PGwxY.css"}],["$","link",null,{"rel":"stylesheet","href":"/MerkleForge/assets/_root-B6UvDDeF.css"}],["$","link",null,{"rel":"stylesheet","href":"/MerkleForge/assets/vocs-group-icons-a56b571edeb7.css"}],["$","$L1",null,{"includeJsonLd":false}]]}],["$","body",null,{"data-version":"1.0","children":[["$","$L2",null,{"children":["$","$L4",null,{}]}],["$","$L6",null,{}]]}]]}]],"route:/_root.d":["$","$L7",null,{"id":"page:/_root.d"}],"page:/_root.d":[["$undefined"],["$","html",null,{"data-vocs":true,"lang":"en","style":{"colorScheme":"light dark","--vocs-color-accent":"light-dark(#000000, #ffffff)"},"suppressHydrationWarning":true,"children":[["$","head",null,{"children":[["$","meta",null,{"charSet":"utf-8"}],["$","meta",null,{"name":"viewport","content":"width=device-width, initial-scale=1"}],["$","link",null,{"rel":"stylesheet","href":"/MerkleForge/assets/index-Ch7PGwxY.css"}],["$","link",null,{"rel":"stylesheet","href":"/MerkleForge/assets/_root-B6UvDDeF.css"}],["$","link",null,{"rel":"stylesheet","href":"/MerkleForge/assets/vocs-group-icons-a56b571edeb7.css"}],["$","$L1",null,{"includeJsonLd":false}]]}],["$","body",null,{"data-version":"1.0","children":[["$","$L2",null,{"children":["$","$L4",null,{}]}],["$","$L6",null,{}]]}]]}]],"ROUTE":["/_root.d",""],"IS_STATIC":true,"HAS404":true,"_buildId":"6pRk5vsc","_etags":{"root":1,"route:/_root.d":1,"page:/_root.d":1}}

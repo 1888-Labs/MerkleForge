@@ -1,0 +1,31 @@
+# MerkleForge
+
+Authenticated data structures for Rust and TypeScript: Binary, Sparse, and Ethereum-compatible Patricia Merkle trees behind one API, with pluggable hashes and byte-identical stateless proofs.
+
+- [Why MerkleForge](https://1888-labs.github.io/MerkleForge/docs/): The problem MerkleForge solves and how it approaches authenticated data in Rust and TypeScript.
+- [Getting started](https://1888-labs.github.io/MerkleForge/docs/getting-started): Install MerkleForge and build, prove, and verify your first Merkle tree, in Rust or TypeScript.
+- [Mental model](https://1888-labs.github.io/MerkleForge/docs/mental-model): Leaves, roots, proofs, and verifiers, and why MerkleForge separates leaf and node hashes.
+- [Choosing a tree](https://1888-labs.github.io/MerkleForge/docs/guides/choosing-a-tree): Which MerkleForge tree variant fits your data, and how to write code that works with all of them.
+- [Binary Merkle tree](https://1888-labs.github.io/MerkleForge/docs/guides/binary-merkle-tree): Build, update, prove, and verify with BinaryMerkleTree, in Rust or TypeScript.
+- [Sparse Merkle tree](https://1888-labs.github.io/MerkleForge/docs/guides/sparse-merkle-tree): Key-addressed state with membership and non-membership proofs and batch updates, in Rust or TypeScript.
+- [Merkle Patricia trie](https://1888-labs.github.io/MerkleForge/docs/guides/merkle-patricia-trie): Ethereum-compatible state roots and RLP witnesses with MerklePatriciaTrie, in Rust or TypeScript.
+- [Hash functions](https://1888-labs.github.io/MerkleForge/docs/guides/hash-functions): The SHA-256, Keccak-256, and BLAKE3 adapters, domain separation, WebAssembly hashes, and writing your own HashFunction, in Rust or TypeScript.
+- [Proofs & stateless verification](https://1888-labs.github.io/MerkleForge/docs/guides/proofs): Proof types, stateless verifiers, and a server/light-client example, in Rust or TypeScript.
+- [Serialization](https://1888-labs.github.io/MerkleForge/docs/guides/serialization): Store and transmit proofs and trees with the Serializable trait, bincode, or any serde format in Rust, or with byte-compatible codecs in TypeScript.
+- [Metadata](https://1888-labs.github.io/MerkleForge/docs/guides/metadata): Inspect tree size, height, node count, hash algorithm, and variant with TreeMetadata, in Rust or TypeScript.
+- [Errors](https://1888-labs.github.io/MerkleForge/docs/guides/errors): MerkleError variants, when each one occurs, and how to handle them in Rust or TypeScript.
+- [no_std](https://1888-labs.github.io/MerkleForge/docs/guides/no-std): Using merkle-core in no_std + alloc environments.
+- [Benchmarks](https://1888-labs.github.io/MerkleForge/docs/performance/benchmarks): Published results for the Rust crates (Criterion) and the TypeScript packages (compared with other JavaScript Merkle libraries), and how to reproduce them.
+- [Profiling & energy](https://1888-labs.github.io/MerkleForge/docs/performance/profiling): Flamegraphs, CPU and heap profiles, hardware counters, and energy measurements for MerkleForge workloads.
+- [API overview](https://1888-labs.github.io/MerkleForge/docs/reference/api): The public API of the MerkleForge Rust crates and TypeScript packages, with links to docs.rs and npm.
+- [TypeScript packages](https://1888-labs.github.io/MerkleForge/docs/reference/typescript): The @merkleforge npm packages, how they map to the Rust crates, and what is compatible between the two.
+- [Changelog](https://1888-labs.github.io/MerkleForge/docs/reference/changelog): Release history for the MerkleForge Rust crates and TypeScript packages.
+- [Security](https://1888-labs.github.io/MerkleForge/docs/reference/security): Audit status, how to report vulnerabilities, and what verifiers must trust.
+- [Brand assets](https://1888-labs.github.io/MerkleForge/docs/reference/brand): The MerkleForge mark, lockups, colours, type, and usage rules.
+- [Contributing](https://1888-labs.github.io/MerkleForge/docs/community/contributing): How to set up the workspace, run the checks, and open a good pull request.
+- [Code of Conduct](https://1888-labs.github.io/MerkleForge/docs/community/code-of-conduct): The MerkleForge community Code of Conduct (Contributor Covenant 2.1).
+- [Projects using MerkleForge](https://1888-labs.github.io/MerkleForge/docs/community/projects): Open-source projects built on MerkleForge.
+- [MerkleForge · Authenticated data structures for Rust and TypeScript](https://1888-labs.github.io/MerkleForge/): Binary, Sparse, and Ethereum-compatible Patricia Merkle trees behind one API, as Rust crates and TypeScript packages with byte-identical proofs.
+- [Benchmarks](https://1888-labs.github.io/MerkleForge/benchmarks): Live Criterion results for the MerkleForge Rust crates, TypeScript package benchmarks, and comparisons with other Merkle tree libraries.
+- [Live demo](https://1888-labs.github.io/MerkleForge/demo): Build a SHA-256 Merkle tree in your browser with the MerkleForge TypeScript packages, prove a row, and verify it statelessly.
+- [Examples](https://1888-labs.github.io/MerkleForge/examples): Copy-pasteable MerkleForge programs in Rust and TypeScript for binary proofs, sparse state, Patricia witnesses, hashing, metadata, and proof transport.
