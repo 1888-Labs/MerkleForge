@@ -64,11 +64,8 @@ where
     H::Digest: From<[u8; 32]>,
 {
     let mut tree = MerklePatriciaTrie::new();
-    for (key, value) in updates {
-        tree.insert(key, value)
-            .expect("benchmark values are always non-empty");
-    }
-
+    tree.batch_insert(updates)
+        .expect("benchmark values are always non-empty");
     tree
 }
 
@@ -131,10 +128,10 @@ where
         group.throughput(Throughput::Elements(1));
         group.bench_with_input(
             BenchmarkId::new(algorithm, size),
-            &(existing, insert_key, insert_value),
+            &(build_tree::<H>(&existing), insert_key, insert_value),
             |b, (existing, insert_key, insert_value)| {
                 b.iter_batched(
-                    || build_tree::<H>(existing),
+                    || existing.clone(),
                     |mut tree| {
                         tree.insert(black_box(insert_key), black_box(insert_value))
                             .expect("benchmark insert value is non-empty");
