@@ -129,6 +129,28 @@ impl<H: HashFunction> BinaryMerkleTree<H> {
         I: IntoIterator,
         I::Item: AsRef<[u8]>,
     {
+        #[cfg(feature = "parallel")]
+        {
+            let leaves: Vec<I::Item> = leaves.into_iter().collect();
+            if leaves.len() >= parallel::MIN_PARALLEL_LEAVES {
+                let data: Vec<&[u8]> = leaves.iter().map(AsRef::as_ref).collect();
+                if data.iter().any(|leaf| leaf.is_empty()) {
+                    return Err(MerkleError::EmptyLeafData);
+                }
+                return Ok(Self::from_leaf_hashes(parallel::hash_leaves::<H>(&data)));
+            }
+            Self::hash_leaves_sequential(leaves)
+        }
+
+        #[cfg(not(feature = "parallel"))]
+        Self::hash_leaves_sequential(leaves)
+    }
+
+    fn hash_leaves_sequential<I>(leaves: I) -> Result<Self, MerkleError>
+    where
+        I: IntoIterator,
+        I::Item: AsRef<[u8]>,
+    {
         let hashes = leaves
             .into_iter()
             .map(|leaf| {
@@ -499,6 +521,13 @@ impl<H: HashFunction> BinaryMerkleTree<H> {
         }
     }
 
+    /// Recomputes every internal node, one layer at a time.
+    ///
+    /// Only pairs above real leaves are hashed, through
+    /// [`HashFunction::hash_node_pairs`]. The rest of each layer is padding:
+    /// every such node is the root of an all-empty subtree of that height,
+    /// so it is the same digest everywhere and is computed once per layer.
+    /// Leaf slots at or after `leaf_count` always hold [`HashFunction::empty`].
     fn recompute_root(&mut self) {
         let leaf_capacity = self.leaf_capacity();
         if leaf_capacity == 0 {
@@ -507,19 +536,36 @@ impl<H: HashFunction> BinaryMerkleTree<H> {
 
         let mut layer_start = 0;
         let mut layer_width = leaf_capacity;
-        let mut parent_start = leaf_capacity;
+        let mut populated = self.leaf_count;
+        let mut empty_subtree = H::empty();
 
         while layer_width > 1 {
-            for offset in 0..(layer_width / 2) {
-                let left = self.nodes[layer_start + offset * 2].clone();
-                let right = self.nodes[layer_start + offset * 2 + 1].clone();
-                self.nodes[parent_start + offset] = H::hash_nodes(&left, &right);
-            }
+            let parent_start = layer_start + layer_width;
+            let parent_width = layer_width / 2;
+            let pairs = populated.div_ceil(2);
+
+            let (lower, upper) = self.nodes.split_at_mut(parent_start);
+            let children = &lower[layer_start..layer_start + 2 * pairs];
+            let parents = &mut upper[..parent_width];
+            Self::hash_layer(children, &mut parents[..pairs]);
+
+            empty_subtree = H::hash_nodes(&empty_subtree, &empty_subtree);
+            parents[pairs..].fill(empty_subtree.clone());
 
             layer_start = parent_start;
-            layer_width /= 2;
-            parent_start += layer_width;
+            layer_width = parent_width;
+            populated = pairs;
         }
+    }
+
+    #[cfg(feature = "parallel")]
+    fn hash_layer(children: &[H::Digest], parents: &mut [H::Digest]) {
+        parallel::hash_layer::<H>(children, parents);
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    fn hash_layer(children: &[H::Digest], parents: &mut [H::Digest]) {
+        H::hash_node_pairs(children, parents);
     }
 
     fn recompute_path(&mut self, leaf_index: usize) {
@@ -539,6 +585,37 @@ impl<H: HashFunction> BinaryMerkleTree<H> {
             layer_width /= 2;
             parent_start += layer_width;
         }
+    }
+}
+
+/// Multi-threaded building blocks, enabled by the `parallel` feature.
+#[cfg(feature = "parallel")]
+mod parallel {
+
+    use merkle_core::traits::HashFunction;
+    use rayon::prelude::*;
+
+    /// Below this many leaves, a build runs on the calling thread: splitting
+    /// small trees across threads costs more than it saves.
+    pub(super) const MIN_PARALLEL_LEAVES: usize = 4096;
+
+    /// Pairs hashed per task. Large enough to amortise scheduling, small
+    /// enough to balance across cores.
+    const PAIRS_PER_TASK: usize = 1024;
+
+    pub(super) fn hash_leaves<H: HashFunction>(leaves: &[&[u8]]) -> Vec<H::Digest> {
+        leaves.par_iter().map(|leaf| H::hash(leaf)).collect()
+    }
+
+    pub(super) fn hash_layer<H: HashFunction>(children: &[H::Digest], parents: &mut [H::Digest]) {
+        if parents.len() < PAIRS_PER_TASK * 2 {
+            H::hash_node_pairs(children, parents);
+            return;
+        }
+        parents
+            .par_chunks_mut(PAIRS_PER_TASK)
+            .zip(children.par_chunks(2 * PAIRS_PER_TASK))
+            .for_each(|(parents, children)| H::hash_node_pairs(children, parents));
     }
 }
 
@@ -704,6 +781,29 @@ where
 mod tests {
     use super::*;
     use merkleforge_hash::Sha256;
+
+    #[test]
+    fn bulk_build_matches_sequential_inserts_across_padding_and_parallel_sizes() {
+        // Sizes just above powers of two leave most of the leaf layer as
+        // padding; 4097 and 9000 cross the `parallel` feature's threshold.
+        for n in [1_usize, 2, 3, 5, 17, 1025, 4097, 9000] {
+            let leaves: Vec<Vec<u8>> = (0..n).map(|i| format!("leaf-{i}").into_bytes()).collect();
+            let bulk = BinaryMerkleTree::<Sha256>::from_leaves(&leaves).unwrap();
+
+            let mut sequential = BinaryMerkleTree::<Sha256>::new();
+            for leaf in &leaves {
+                sequential.insert(leaf).unwrap();
+            }
+
+            assert_eq!(bulk.root(), sequential.root(), "root for {n} leaves");
+            assert_eq!(bulk.nodes, sequential.nodes, "every node for {n} leaves");
+            let last = LeafIndex(n - 1);
+            assert_eq!(
+                bulk.generate_proof(last).unwrap(),
+                sequential.generate_proof(last).unwrap()
+            );
+        }
+    }
 
     #[test]
     fn new_tree_is_empty() {

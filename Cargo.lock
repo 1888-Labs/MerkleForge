@@ -469,6 +469,7 @@ dependencies = [
  "merkle-core",
  "merkleforge-hash",
  "proptest",
+ "rayon",
  "serde",
  "serde_json",
 ]
