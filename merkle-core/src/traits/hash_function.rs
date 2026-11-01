@@ -82,6 +82,29 @@ pub trait HashFunction: Send + Sync + 'static {
         Self::hash(&combined)
     }
 
+    /// Hashes a whole layer of sibling pairs: `out[i]` becomes
+    /// `hash_nodes(&pairs[2 * i], &pairs[2 * i + 1])`.
+    ///
+    /// Trees call this once per layer instead of calling
+    /// [`HashFunction::hash_nodes`] once per node, so an implementation can
+    /// hash several independent pairs at a time (multi-buffer SIMD, a GPU, or
+    /// a batched accelerator). The default calls `hash_nodes` for each pair.
+    /// Overrides must produce exactly the same digests.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `pairs.len() != 2 * out.len()`.
+    fn hash_node_pairs(pairs: &[Self::Digest], out: &mut [Self::Digest]) {
+        assert_eq!(
+            pairs.len(),
+            2 * out.len(),
+            "hash_node_pairs needs two children per output digest"
+        );
+        for (parent, children) in out.iter_mut().zip(pairs.chunks_exact(2)) {
+            *parent = Self::hash_nodes(&children[0], &children[1]);
+        }
+    }
+
     /// Hash an encoded node whose encoding already identifies its node type,
     /// such as an RLP-encoded Merkle Patricia Trie node.
     ///
@@ -166,6 +189,26 @@ mod tests {
     #[test]
     fn empty_is_hash_of_empty_slice() {
         assert_eq!(Xor8::empty(), Xor8::hash(&[]));
+    }
+
+    #[test]
+    fn default_hash_node_pairs_matches_hash_nodes() {
+        let children: Vec<[u8; 1]> = (0u8..8).map(|b| [b * 3]).collect();
+        let mut parents = alloc::vec![[0u8; 1]; 4];
+        Xor8::hash_node_pairs(&children, &mut parents);
+        for (i, parent) in parents.iter().enumerate() {
+            assert_eq!(
+                *parent,
+                Xor8::hash_nodes(&children[2 * i], &children[2 * i + 1])
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "two children per output digest")]
+    fn hash_node_pairs_rejects_mismatched_lengths() {
+        let mut parents = alloc::vec![[0u8; 1]; 2];
+        Xor8::hash_node_pairs(&[[1], [2], [3]], &mut parents);
     }
 
     #[test]
