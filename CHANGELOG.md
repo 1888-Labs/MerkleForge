@@ -13,7 +13,37 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-No unreleased changes yet.
+Performance work. Roots, proofs, stored nodes, and serialized forms are
+unchanged; new tests check bulk builds against one-at-a-time inserts for every
+tree.
+
+### Added
+
+- `HashFunction::hash_node_pairs` (`merkle-core`): hashes a whole layer of
+  sibling pairs in one call. It has a default implementation, so existing
+  adapters keep working; it is the hook for multi-buffer SIMD and GPU
+  adapters.
+- `parallel` feature for `merkle-variants`: builds large `BinaryMerkleTree`s,
+  `SparseMerkleTree` batch inserts, and `MerklePatriciaTrie` batch inserts on
+  every core with `rayon`.
+- `MerklePatriciaTrie::batch_insert`: inserts many entries and hashes each
+  changed node once (about 5x faster than repeated `insert` for 100,000
+  entries, about 9x with `parallel`).
+
+### Changed
+
+- `BinaryMerkleTree` no longer hashes padding: each layer's empty-subtree
+  digest is computed once and copied into the padded slots.
+- `SparseMerkleTree` shares one table of empty-subtree digests per hash type,
+  so `verify_membership` and `verify_non_membership` no longer recompute up to
+  256 empty hashes (about 2x faster), and `new` is cheaper.
+- `MerklePatriciaTrie` hashes new and changed nodes lazily, once, when the
+  root is refreshed.
+- `Blake3` (`merkleforge-hash`) reuses its derive-key hashers instead of
+  re-deriving the context key on every call (about 25% faster per node).
+- The sparse and Patricia insert benchmarks clone a prebuilt tree per
+  iteration instead of rebuilding it, so the 10,000-entry cases finish in
+  seconds.
 
 ---
 
