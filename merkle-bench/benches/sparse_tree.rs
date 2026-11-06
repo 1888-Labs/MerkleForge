@@ -117,10 +117,10 @@ fn bench_sparse_insert_for<H: HashFunction>(c: &mut Criterion, algorithm: &str) 
         group.throughput(Throughput::Elements(1));
         group.bench_with_input(
             BenchmarkId::new(algorithm, size),
-            &(existing, insert_key, insert_value),
+            &(build_tree::<H>(&existing), insert_key, insert_value),
             |b, (existing, insert_key, insert_value)| {
                 b.iter_batched(
-                    || build_tree::<H>(existing),
+                    || existing.clone(),
                     |mut tree| {
                         tree.insert(black_box(*insert_key), black_box(insert_value))
                             .expect("benchmark insert data is non-empty");

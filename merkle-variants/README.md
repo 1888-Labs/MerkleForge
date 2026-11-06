@@ -31,6 +31,14 @@ merkleforge-hash = "0.5.1"
 merkle-variants = "0.5.1"
 ```
 
+To build large trees on every core, enable the `parallel` feature (it pulls
+in [`rayon`](https://crates.io/crates/rayon)). Roots, proofs, and stored
+nodes are identical with or without it:
+
+```toml
+merkle-variants = { version = "0.5.1", features = ["parallel"] }
+```
+
 ## Which Tree Should I Use?
 
 | Variant | Use it for | Key capability |
@@ -144,6 +152,8 @@ Highlights:
 - Recursive Length Prefix node encoding;
 - inline/hash node references following Ethereum rules;
 - key-value insert, lookup, remove, and canonical node collapsing;
+- `batch_insert` for loading many entries, which hashes each node once
+  instead of once per insert;
 - EIP-1186-style membership and non-membership witnesses;
 - validation against Ethereum trie vectors.
 

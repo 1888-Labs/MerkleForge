@@ -21,12 +21,28 @@
 //! assert_eq!(digest.len(), 32);
 //! ```
 
+use std::sync::OnceLock;
+
 use merkle_core::traits::HashFunction;
 
 /// Leaf domain-separation context string.
 const LEAF_CONTEXT: &str = "MerkleForge 2026 leaf v1";
 /// Internal node domain-separation context string.
 const NODE_CONTEXT: &str = "MerkleForge 2026 internal-node v1";
+
+/// Derive-key hashers for the two contexts, created once.
+///
+/// `blake3::derive_key(context, data)` first hashes the context string into a
+/// key on every call. Cloning a hasher that already holds that key skips the
+/// extra compression, about a quarter of the cost for 32- and 64-byte inputs.
+/// The digests are identical.
+fn context_hasher(cell: &'static OnceLock<blake3::Hasher>, context: &str) -> blake3::Hasher {
+    cell.get_or_init(|| blake3::Hasher::new_derive_key(context))
+        .clone()
+}
+
+static LEAF_HASHER: OnceLock<blake3::Hasher> = OnceLock::new();
+static NODE_HASHER: OnceLock<blake3::Hasher> = OnceLock::new();
 
 /// BLAKE3 implementation of [`HashFunction`].
 ///
@@ -42,17 +58,19 @@ impl HashFunction for Blake3 {
     /// Leaf hashing using BLAKE3's derive-key mode with context `"MerkleForge 2026 leaf v1"`.
     #[inline]
     fn hash(data: &[u8]) -> [u8; 32] {
-        blake3::derive_key(LEAF_CONTEXT, data)
+        let mut hasher = context_hasher(&LEAF_HASHER, LEAF_CONTEXT);
+        hasher.update(data);
+        *hasher.finalize().as_bytes()
     }
 
     /// Internal node hashing using BLAKE3's derive-key mode with context
     /// `"MerkleForge 2026 internal-node v1"` applied to `left || right`.
     #[inline]
     fn hash_nodes(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
-        let mut combined = [0u8; 64];
-        combined[..32].copy_from_slice(left);
-        combined[32..].copy_from_slice(right);
-        blake3::derive_key(NODE_CONTEXT, &combined)
+        let mut hasher = context_hasher(&NODE_HASHER, NODE_CONTEXT);
+        hasher.update(left);
+        hasher.update(right);
+        *hasher.finalize().as_bytes()
     }
 
     /// The canonical empty-leaf hash: `BLAKE3_leaf("")`.
@@ -113,6 +131,23 @@ mod tests {
     #[test]
     fn empty_matches_runtime_computation() {
         assert_eq!(Blake3::empty(), blake3::derive_key(LEAF_CONTEXT, b""));
+    }
+
+    #[test]
+    fn cached_hashers_match_derive_key() {
+        for len in [0_usize, 1, 31, 32, 33, 64, 65, 1023, 1024, 1025, 5000] {
+            let data: Vec<u8> = (0..len).map(|i| (i * 7 + len) as u8).collect();
+            assert_eq!(Blake3::hash(&data), blake3::derive_key(LEAF_CONTEXT, &data));
+        }
+        let left = [0x11u8; 32];
+        let right = [0x22u8; 32];
+        let mut combined = [0u8; 64];
+        combined[..32].copy_from_slice(&left);
+        combined[32..].copy_from_slice(&right);
+        assert_eq!(
+            Blake3::hash_nodes(&left, &right),
+            blake3::derive_key(NODE_CONTEXT, &combined)
+        );
     }
 
     #[test]

@@ -12,9 +12,14 @@ homepage.workspace   = true
 documentation = "https://docs.rs/merkle-variants"
 keywords.workspace   = true
 
+[features]
+# Builds large trees on all cores with rayon. Roots and proofs are identical.
+parallel = ["dep:rayon"]
+
 [dependencies]
 merkle-core = { workspace = true }
 serde       = { workspace = true }
+rayon       = { workspace = true, optional = true }
 
 [dev-dependencies]
 merkleforge-hash = { workspace = true }

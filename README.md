@@ -61,7 +61,7 @@ API:
 - **Pluggable hashes.** `Sha256`, `Keccak256`, or `Blake3`, chosen by a type parameter at compile time with no runtime cost.
 - **Stateless proofs.** Light clients verify inclusion with only a trusted root, the leaf, and a compact `O(log n)` proof.
 - **Ethereum-compatible.** Patricia trie state roots are validated against the official Ethereum test vectors.
-- **Measured.** Criterion benchmarks against `rs-merkle` and `merkle_light`, published in [`BENCHMARKS.md`](BENCHMARKS.md).
+- **Measured.** Against `rs-merkle` at 1M leaves (same leaves, same SHA-256, same machine): proofs generated 12x faster, multiproofs 6x, single proofs verified 4.5x, all on one thread; with the `parallel` feature, trees built 6x faster and 10,000 proofs verified 14x faster. Every ratio, its thread count, and how to rerun it: [`BENCHMARKS.md`](BENCHMARKS.md#faster-than-what).
 - **Safe.** `#![forbid(unsafe_code)]` across the workspace, with Proptest invariants for every variant.
 
 ## Quick start

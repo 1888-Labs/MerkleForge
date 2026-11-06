@@ -8,6 +8,10 @@ rust-version.workspace = true
 authors.workspace    = true
 license.workspace    = true
 
+[features]
+# Benchmarks the multi-threaded builds: `cargo bench --features parallel`.
+parallel = ["merkle-variants/parallel"]
+
 [dev-dependencies]
 merkle-core = { workspace = true }
 merkleforge-hash = { workspace = true }
