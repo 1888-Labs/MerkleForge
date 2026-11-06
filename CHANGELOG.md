@@ -26,12 +26,20 @@ tree.
 - `parallel` feature for `merkle-variants`: builds large `BinaryMerkleTree`s,
   `SparseMerkleTree` batch inserts, and `MerklePatriciaTrie` batch inserts on
   every core with `rayon`.
+- `BinaryMerkleTree::verify_batch`: verifies many inclusion proofs against
+  one root, on every core with the `parallel` feature (10,000 proofs about 3x
+  faster than a loop over `verify` on 4 cores).
 - `MerklePatriciaTrie::batch_insert`: inserts many entries and hashes each
   changed node once (about 5x faster than repeated `insert` for 100,000
   entries, about 9x with `parallel`).
 
 ### Changed
 
+- `Sha256` (`merkleforge-hash`) hashes internal nodes and leaves of up to 54
+  bytes by laying out the padded blocks itself and calling the SHA-256
+  compression function directly, skipping the streaming hasher's buffering.
+  Digests are unchanged (tested against the streaming hasher at every length
+  from 0 to 299 bytes). Single-proof verification is about 15% faster.
 - `BinaryMerkleTree` no longer hashes padding: each layer's empty-subtree
   digest is computed once and copied into the padded slots.
 - `SparseMerkleTree` shares one table of empty-subtree digests per hash type,

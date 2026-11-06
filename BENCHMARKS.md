@@ -176,27 +176,89 @@ Detailed reproduction notes live in [`benchmarks/ENERGY.md`](benchmarks/ENERGY.m
 
 ## Comparative: MerkleForge vs `rs-merkle` vs `merkle_light`
 
-Populated from:
+Run 2026-11-06 on the machine above (i7-1185G7, 4 cores / 8 threads, rustc
+1.97.1), SHA-256 everywhere, the same deterministic 32-byte leaves for every
+library, Criterion medians. Every ratio below is **MerkleForge against the
+named library, same operation, same leaves, same hash, same run**. MerkleForge
+and the other libraries produce different roots (MerkleForge domain-separates
+leaves and nodes), so this compares speed for the same job, not identical
+output.
+
+### Faster than what?
+
+Against [`rs-merkle`](https://crates.io/crates/rs_merkle) 1.5, at 1,048,576 leaves:
+
+| Operation | MerkleForge | `rs-merkle` | Faster | Threads (MerkleForge / rs-merkle) |
+|---|---:|---:|---:|---|
+| Generate one proof | 191 ns | 2.26 µs | **11.8x** | 1 / 1 |
+| Generate a multiproof (100 leaves) | 8.1 µs | 48.3 µs | **6.0x** | 1 / 1 |
+| Build the tree (`parallel` feature) | 72.3 ms | 458 ms | **6.3x** | 8 / 1 |
+| Verify 10,000 proofs (`verify_batch`, `parallel`) | 6.1 ms | 89.0 ms | **14.5x** | 8 / 1 |
+| Verify 10,000 proofs (`verify_batch`, one thread) | 19.3 ms | 88.7 ms | **4.6x** | 1 / 1 |
+| Verify one proof | 1.86 µs | 8.36 µs | **4.5x** | 1 / 1 |
+| Build the tree (one thread) | 183 ms | 437 ms | **2.4x** | 1 / 1 |
+| Verify a multiproof (100 leaves) | 144 µs | 290 µs | **2.0x** | 1 / 1 |
+
+Against [`merkle_light`](https://crates.io/crates/merkle_light) at 1,048,576
+leaves, MerkleForge builds **2.7x** faster and verifies 10,000 proofs **3.7x**
+faster with `parallel`; single-threaded, the two are within about 20% on every
+operation. `merkle_light` has no multiproofs.
+
+What favours whom:
+
+- MerkleForge hashes every leaf with a `0x00` prefix and every node with a
+  `0x01` prefix, which blocks second-preimage attacks. That is extra work the
+  other libraries skip, and it is counted in MerkleForge's times.
+- `rs-merkle` is given its leaves already hashed in verification (its API
+  takes leaf hashes); MerkleForge hashes the raw leaf inside `verify`. In
+  construction, `rs-merkle`'s leaf hashing is timed.
+- Rows marked 8 threads use the `parallel` feature (rayon) on this 4-core
+  laptop; the other libraries have no multi-threaded build or batch verifier.
+  The one-thread rows are the like-for-like comparison.
+
+### Full results
+
+**10,000 leaves**
+
+| Operation | MerkleForge | MerkleForge `parallel` | `rs-merkle` | `merkle_light` |
+|---|---:|---:|---:|---:|
+| Build (`from_leaves`) | 1.59 ms | 1.20 ms | 3.02 ms | 1.73 ms |
+| Build (one `insert` at a time) | 13.6 ms | 14.6 ms | n/a | n/a |
+| Generate one proof | 193 ns | 172 ns | 1.61 µs | 181 ns |
+| Verify one proof | 1.46 µs | 1.36 µs | 5.93 µs | 1.57 µs |
+| Verify 10,000 proofs | 15.0 ms | 4.55 ms | 68.2 ms | 16.5 ms |
+| Generate a multiproof (100 leaves) | 3.89 µs | 4.29 µs | 24.5 µs | n/a |
+| Verify a multiproof (100 leaves) | 84.6 µs | 82.5 µs | 168 µs | n/a |
+
+**1,048,576 leaves**
+
+| Operation | MerkleForge | MerkleForge `parallel` | `rs-merkle` | `merkle_light` |
+|---|---:|---:|---:|---:|
+| Build (`from_leaves`) | 183 ms | 72.3 ms | 437 ms | 196 ms |
+| Build (one `insert` at a time) | 2.01 s | 2.10 s | n/a | n/a |
+| Generate one proof | 191 ns | 193 ns | 2.26 µs | 261 ns |
+| Verify one proof | 2.33 µs | 1.86 µs | 8.63 µs | 2.15 µs |
+| Verify 10,000 proofs | 19.3 ms | 6.15 ms | 88.7 ms | 22.6 ms |
+| Generate a multiproof (100 leaves) | 8.11 µs | 7.88 µs | 48.3 µs | n/a |
+| Verify a multiproof (100 leaves) | 144 µs | 142 µs | 290 µs | n/a |
+
+The `rs-merkle` and `merkle_light` columns come from the single-thread run;
+their numbers in the `parallel` run were within noise (they do not use the
+feature). Proof sizes for a 10,000-leaf tree: MerkleForge 469 bytes,
+`rs-merkle` 448, `merkle_light` 512.
+
+### Reproduce
 
 ```bash
-cargo bench --bench comparison
-MERKLEFORGE_PRINT_COMPARISON_SIZES=1 cargo bench --bench comparison -- --list
+cargo bench -p merkle-bench --bench comparison                        # 10,000 leaves
+cargo bench -p merkle-bench --bench comparison --features parallel    # multi-threaded build and verify_batch
+COMPARISON_LEAVES=1048576 cargo bench -p merkle-bench --bench comparison
+COMPARISON_LEAVES=1048576 cargo bench -p merkle-bench --bench comparison --features parallel
+MERKLEFORGE_PRINT_COMPARISON_SIZES=1 cargo bench -p merkle-bench --bench comparison -- --list   # proof sizes
 ```
 
-Current local baseline for library comparisons:
-
-| Metric | MerkleForge | `rs-merkle` | `merkle_light` |
-|--------|-------------|-------------|----------------|
-| 10K leaf construction (ms) | 22.77 | 3.69 | 2.29 |
-| Proof size (bytes, 10K tree) | 469 | 448 | 512 |
-| Proof verification (µs) | 1.84 | 6.39 | 1.78 |
-
-Notes:
-
-- Construction uses deterministic 32-byte leaves across all libraries.
-- `rs-merkle` receives pre-hashed SHA-256 leaves, matching its public API.
-- Proof size is the serialized proof byte count reported by each library.
-- Lower is better for construction, proof size, and proof verification.
+Timings on a laptop vary by 10–20% between runs; compare ratios, not single
+numbers.
 
 ## How To Read The Tables
 

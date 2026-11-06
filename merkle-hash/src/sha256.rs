@@ -19,7 +19,63 @@
 //! ```
 
 use merkle_core::traits::HashFunction;
+use sha2::digest::generic_array::GenericArray;
 use sha2::{Digest as Sha2Digest, Sha256 as Sha2_256};
+
+/// SHA-256 initial state (FIPS 180-4, section 5.3.3).
+const IV: [u32; 8] = [
+    0x6a09_e667,
+    0xbb67_ae85,
+    0x3c6e_f372,
+    0xa54f_f53a,
+    0x510e_527f,
+    0x9b05_688c,
+    0x1f83_d9ab,
+    0x5be0_cd19,
+];
+
+/// Big-endian bytes of a SHA-256 state.
+#[inline]
+fn state_bytes(state: &[u32; 8]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    for (chunk, word) in out.chunks_exact_mut(4).zip(state) {
+        chunk.copy_from_slice(&word.to_be_bytes());
+    }
+    out
+}
+
+/// `SHA-256(0x01 || left || right)` with the two padded blocks laid out
+/// directly and handed to the compression function, skipping the streaming
+/// hasher's buffering. The 65-byte message always needs exactly two blocks:
+/// the second holds the last byte of `right`, the `0x80` pad, and the bit
+/// length (520). Same digest as the streaming hasher.
+#[inline]
+fn node_digest(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
+    let mut blocks = [GenericArray::<u8, sha2::digest::consts::U64>::default(); 2];
+    blocks[0][0] = 0x01;
+    blocks[0][1..33].copy_from_slice(left);
+    blocks[0][33..64].copy_from_slice(&right[..31]);
+    blocks[1][0] = right[31];
+    blocks[1][1] = 0x80;
+    blocks[1][56..64].copy_from_slice(&520u64.to_be_bytes());
+    let mut state = IV;
+    sha2::compress256(&mut state, &blocks);
+    state_bytes(&state)
+}
+
+/// `SHA-256(0x00 || data)` for data of at most 54 bytes, which fits one
+/// padded block (1 prefix byte + data + `0x80` + 8 length bytes <= 64).
+#[inline]
+fn short_leaf_digest(data: &[u8]) -> [u8; 32] {
+    debug_assert!(data.len() <= 54);
+    let mut block = [GenericArray::<u8, sha2::digest::consts::U64>::default(); 1];
+    block[0][1..=data.len()].copy_from_slice(data);
+    block[0][data.len() + 1] = 0x80;
+    block[0][56..64].copy_from_slice(&(((data.len() as u64) + 1) * 8).to_be_bytes());
+    let mut state = IV;
+    sha2::compress256(&mut state, &block);
+    state_bytes(&state)
+}
 
 /// SHA-256 implementation of [`HashFunction`].
 ///
@@ -39,11 +95,7 @@ impl HashFunction for Sha256 {
     /// could substitute an internal node for a leaf.
     #[inline]
     fn hash_nodes(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
-        let mut hasher = Sha2_256::new();
-        hasher.update([0x01]); // internal-node domain separator
-        hasher.update(left);
-        hasher.update(right);
-        hasher.finalize().into()
+        node_digest(left, right) // 0x01 internal-node domain separator
     }
 
     /// Leaf hashing: `SHA-256(0x00 || data)`.
@@ -54,6 +106,9 @@ impl HashFunction for Sha256 {
     /// need to know about it.
     #[inline]
     fn hash(data: &[u8]) -> [u8; 32] {
+        if data.len() <= 54 {
+            return short_leaf_digest(data);
+        }
         let mut hasher = Sha2_256::new();
         hasher.update([0x00]); // Leaf domain separator
         hasher.update(data);
@@ -85,6 +140,40 @@ impl HashFunction for Sha256 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn streaming(parts: &[&[u8]]) -> [u8; 32] {
+        let mut hasher = Sha2_256::new();
+        for part in parts {
+            hasher.update(part);
+        }
+        hasher.finalize().into()
+    }
+
+    #[test]
+    fn direct_compression_matches_the_streaming_hasher() {
+        // Every length across the one-block cutoff (54/55) and several blocks.
+        for len in 0..300usize {
+            let data: Vec<u8> = (0..len).map(|i| (i * 131 + len) as u8).collect();
+            assert_eq!(
+                Sha256::hash(&data),
+                streaming(&[&[0x00], &data]),
+                "leaf, {len} bytes"
+            );
+        }
+        let mut left = [0u8; 32];
+        let mut right = [0u8; 32];
+        for round in 0..1000u32 {
+            for (i, (l, r)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
+                *l = (round as usize * 7 + i * 13) as u8;
+                *r = (round as usize * 11 + i * 29) as u8 ^ 0xa5;
+            }
+            assert_eq!(
+                Sha256::hash_nodes(&left, &right),
+                streaming(&[&[0x01], &left, &right]),
+                "node, round {round}"
+            );
+        }
+    }
 
     /// SHA-256(0x00) — The domain-separated empty leaf hash for MerkleForge.
     const MERKLE_EMPTY_SENTINEL: [u8; 32] = [
