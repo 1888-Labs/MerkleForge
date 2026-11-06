@@ -1,5 +1,19 @@
 name: Release
 
+# Two stages with a human approval between them:
+#
+# 1. prepare  - runs on dispatch: tests, bumps the version and changelog, and
+#               dry-runs `cargo publish` for every crate. It pushes the bump to a
+#               `release/vX.Y.Z` branch only: nothing on main, no tag, nothing
+#               on crates.io.
+# 2. publish  - runs in the `crates-io` environment, which requires a reviewer
+#               to approve ("Review deployments" on the run page). Only then does
+#               it fast-forward main, tag, publish to crates.io, create the
+#               GitHub release, and announce on Telegram.
+#
+# Rejecting (or never approving) the publish job leaves crates.io, main, and the
+# tags untouched; delete the release/vX.Y.Z branch to clean up.
+
 on:
   workflow_dispatch:
     inputs:
@@ -11,15 +25,23 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_NET_RETRY: "10"
+  RELEASE_VERSION: ${{ inputs.version }}
 
 jobs:
-  release:
-    name: Release workspace
+  prepare:
+    name: Prepare and dry-run
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      sha: ${{ steps.push.outputs.sha }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@v6
@@ -37,88 +59,144 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Validate version input
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           python3 - <<'PY'
           import os
           import re
+          import urllib.request
 
           version = os.environ["RELEASE_VERSION"]
           if not re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", version):
               raise SystemExit(f"invalid semantic version: {version}")
+          for crate in ("merkle-core", "merkleforge-hash", "merkle-variants"):
+              url = f"https://crates.io/api/v1/crates/{crate}/{version}"
+              req = urllib.request.Request(url, headers={"User-Agent": "merkleforge-release"})
+              try:
+                  urllib.request.urlopen(req)
+              except urllib.error.HTTPError as err:
+                  if err.code == 404:
+                      continue
+                  raise
+              raise SystemExit(f"{crate} {version} is already on crates.io")
           PY
+          if git ls-remote --exit-code --tags origin "v${RELEASE_VERSION}" >/dev/null; then
+            echo "tag v${RELEASE_VERSION} already exists"; exit 1
+          fi
 
       - name: Run workspace tests
-        run: cargo test --workspace
+        run: cargo test --workspace --all-features
 
       - name: Prepare release files
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          python3 .github/scripts/prepare_release.py "$RELEASE_VERSION" --release-body /tmp/release_body.md
+          python3 .github/scripts/prepare_release.py "$RELEASE_VERSION" --release-body release_body.md
           cargo update --workspace
 
-      - name: Show release diff
-        run: |
-          git diff -- Cargo.toml Cargo.lock CHANGELOG.md merkle-*/README.md
-          cat /tmp/release_body.md
+      - name: Dry-run publish every crate
+        run: cargo publish --workspace --dry-run --allow-dirty
 
-      - name: Commit release bump
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
+      - name: Commit the bump to a release branch
+        id: push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Cargo.toml Cargo.lock CHANGELOG.md merkle-*/README.md
           git commit -m "chore(release): bump workspace to v${RELEASE_VERSION}"
+          git push --force origin "HEAD:refs/heads/release/v${RELEASE_VERSION}"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Create release tag
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: git tag "v${RELEASE_VERSION}"
-
-      - name: Push release commit and tag
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
+      - name: Summary for the reviewer
         run: |
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          {
+            echo "## MerkleForge v${RELEASE_VERSION} is ready to publish"
+            echo
+            echo "Tests and \`cargo publish --dry-run\` passed for merkle-core, merkleforge-hash, and merkle-variants."
+            echo "Nothing has been published, tagged, or pushed to main."
+            echo
+            echo "Release commit: \`$(git rev-parse --short HEAD)\` on branch \`release/v${RELEASE_VERSION}\`"
+            echo
+            echo "Approve the **publish** job (Review deployments) to publish, or reject it to stop."
+            echo
+            echo "### Version bump"
+            echo '```diff'
+            git show --stat --format= HEAD
+            git show HEAD -- Cargo.toml
+            echo '```'
+            echo
+            echo "### Release notes"
+            cat release_body.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the release notes for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-body
+          path: release_body.md
+
+  publish:
+    name: Publish to crates.io (needs approval)
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/merkle-variants
+    steps:
+      - name: Checkout the prepared release commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-body
+
+      # Fails (and stops before publishing) if main moved since prepare ran.
+      - name: Fast-forward main and push the tag
+        run: |
+          git tag "v${RELEASE_VERSION}"
+          git push origin "HEAD:refs/heads/main"
           git push origin "v${RELEASE_VERSION}"
 
       - name: Publish crates.io packages
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
 
           publish_if_missing() {
             local package="$1"
-            local crate="$2"
-
-            if curl --silent --fail "https://crates.io/api/v1/crates/${crate}/${RELEASE_VERSION}" >/dev/null; then
-              echo "${crate} v${RELEASE_VERSION} is already published; skipping."
+            if curl --silent --fail -A merkleforge-release "https://crates.io/api/v1/crates/${package}/${RELEASE_VERSION}" >/dev/null; then
+              echo "${package} v${RELEASE_VERSION} is already published; skipping."
               return
             fi
-
-            echo "Publishing ${package} as ${crate} v${RELEASE_VERSION}..."
-            cargo publish -p "${package}" --token "${CARGO_REGISTRY_TOKEN}"
+            echo "Publishing ${package} v${RELEASE_VERSION}..."
+            cargo publish -p "${package}"
             sleep 20
           }
 
-          publish_if_missing "merkle-core" "merkle-core"
-          publish_if_missing "merkleforge-hash" "merkleforge-hash"
-          publish_if_missing "merkle-variants" "merkle-variants"
+          publish_if_missing merkle-core
+          publish_if_missing merkleforge-hash
+          publish_if_missing merkle-variants
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: gh release create "v${RELEASE_VERSION}" --title "v${RELEASE_VERSION}" --notes-file /tmp/release_body.md
+        run: gh release create "v${RELEASE_VERSION}" --title "v${RELEASE_VERSION}" --notes-file release_body.md
+
+      - name: Delete the release branch
+        run: git push origin --delete "release/v${RELEASE_VERSION}"
 
       - name: Build Telegram release notification
         env:
-          RELEASE_VERSION: ${{ inputs.version }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
