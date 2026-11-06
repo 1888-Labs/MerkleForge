@@ -323,6 +323,29 @@ impl<H: HashFunction> BinaryMerkleTree<H> {
         <Self as ProofVerifier<H>>::verify(expected_root, leaf_data, proof)
     }
 
+    /// Verifies many inclusion proofs against one root; `true` only if every
+    /// proof verifies.
+    ///
+    /// Each item is the raw leaf data and its proof, checked exactly as
+    /// [`Self::verify`] does. With the `parallel` feature, batches of at least
+    /// 64 proofs are checked on all cores; otherwise they are checked in order
+    /// on the calling thread. The result is the same either way.
+    #[must_use]
+    pub fn verify_batch<L: AsRef<[u8]> + Sync>(
+        expected_root: &H::Digest,
+        items: &[(L, MerkleProof<H::Digest>)],
+    ) -> bool {
+        let check = |(leaf, proof): &(L, MerkleProof<H::Digest>)| {
+            Self::verify(expected_root, leaf.as_ref(), proof)
+        };
+        #[cfg(feature = "parallel")]
+        if items.len() >= parallel::MIN_PARALLEL_PROOFS {
+            use rayon::prelude::*;
+            return items.par_iter().all(check);
+        }
+        items.iter().all(check)
+    }
+
     /// Builds a tree whose leaf layer is exactly `hashes`, dropping trailing
     /// empty slots the same way [`Self::remove`] does.
     /// Generates one proof for several leaves.
@@ -599,6 +622,9 @@ mod parallel {
     /// small trees across threads costs more than it saves.
     pub(super) const MIN_PARALLEL_LEAVES: usize = 4096;
 
+    /// Below this many proofs, `verify_batch` runs on the calling thread.
+    pub(super) const MIN_PARALLEL_PROOFS: usize = 64;
+
     /// Pairs hashed per task. Large enough to amortise scheduling, small
     /// enough to balance across cores.
     const PAIRS_PER_TASK: usize = 1024;
@@ -781,6 +807,43 @@ where
 mod tests {
     use super::*;
     use merkleforge_hash::Sha256;
+
+    #[test]
+    fn verify_batch_accepts_valid_proofs_and_rejects_any_bad_one() {
+        // 300 proofs crosses the `parallel` feature's batch threshold.
+        let leaves: Vec<Vec<u8>> = (0..1000)
+            .map(|i| format!("leaf-{i}").into_bytes())
+            .collect();
+        let tree = BinaryMerkleTree::<Sha256>::from_leaves(&leaves).unwrap();
+        let root = *tree.root().unwrap();
+        let mut items: Vec<(Vec<u8>, MerkleProof<[u8; 32]>)> = (0..300)
+            .map(|i| {
+                (
+                    leaves[i * 3].clone(),
+                    tree.generate_proof(LeafIndex(i * 3)).unwrap(),
+                )
+            })
+            .collect();
+        assert!(BinaryMerkleTree::<Sha256>::verify_batch(&root, &items));
+        assert!(BinaryMerkleTree::<Sha256>::verify_batch(
+            &root,
+            &items[..10]
+        ));
+        assert!(BinaryMerkleTree::<Sha256>::verify_batch::<Vec<u8>>(
+            &root,
+            &[]
+        ));
+
+        items[217].0 = b"forged".to_vec();
+        assert!(!BinaryMerkleTree::<Sha256>::verify_batch(&root, &items));
+        items[217].0 = leaves[217 * 3].clone();
+        items[5].1.path[0].hash[0] ^= 1;
+        assert!(!BinaryMerkleTree::<Sha256>::verify_batch(
+            &root,
+            &items[..10]
+        ));
+        assert!(!BinaryMerkleTree::<Sha256>::verify_batch(&root, &items));
+    }
 
     #[test]
     fn bulk_build_matches_sequential_inserts_across_padding_and_parallel_sizes() {
