@@ -27,17 +27,17 @@ single generic type.
 
 ```toml
 [dependencies]
-merkle-core = "0.5.1"
-merkleforge-hash = "0.5.1"
+merkle-core = "0.5.2"
+merkleforge-hash = "0.5.2"
 ```
 
 Add `merkle-variants` when you want complete tree implementations:
 
 ```toml
 [dependencies]
-merkle-core = "0.5.1"
-merkleforge-hash = "0.5.1"
-merkle-variants = "0.5.1"
+merkle-core = "0.5.2"
+merkleforge-hash = "0.5.2"
+merkle-variants = "0.5.2"
 ```
 
 ## Quick Start

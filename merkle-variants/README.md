@@ -26,9 +26,9 @@ SHA-256, Keccak-256, BLAKE3, or your own adapter without changing the tree API.
 
 ```toml
 [dependencies]
-merkle-core = "0.5.1"
-merkleforge-hash = "0.5.1"
-merkle-variants = "0.5.1"
+merkle-core = "0.5.2"
+merkleforge-hash = "0.5.2"
+merkle-variants = "0.5.2"
 ```
 
 To build large trees on every core, enable the `parallel` feature (it pulls
@@ -36,7 +36,7 @@ in [`rayon`](https://crates.io/crates/rayon)). Roots, proofs, and stored
 nodes are identical with or without it:
 
 ```toml
-merkle-variants = { version = "0.5.1", features = ["parallel"] }
+merkle-variants = { version = "0.5.2", features = ["parallel"] }
 ```
 
 ## Which Tree Should I Use?
