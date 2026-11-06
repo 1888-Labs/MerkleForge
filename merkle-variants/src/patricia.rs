@@ -330,7 +330,11 @@ pub struct MerklePatriciaTrie<H: HashFunction> {
 struct TrieNode<D> {
     kind: TrieNodeKind<D>,
     /// How a parent embeds this node: inline RLP, or the hash of its RLP.
+    /// Only meaningful once `hashed` is set.
     reference: NodeRef<D>,
+    /// Whether `reference` is current. New and changed nodes start unhashed
+    /// and are hashed once, bottom-up, by `MerklePatriciaTrie::rehash`.
+    hashed: bool,
     /// Number of nodes in this subtree, including this one.
     node_count: usize,
     /// Longest node path from this node to a leaf, including this node.
@@ -413,6 +417,44 @@ impl<H: HashFunction> MerklePatriciaTrie<H> {
         }
         let path = bytes_to_nibbles(key);
         self.root = Some(Self::insert_at(self.root.take(), &path, value.to_vec()));
+        self.refresh_root_hash();
+
+        Ok(())
+    }
+
+    /// Inserts or updates many entries, hashing each changed node once.
+    ///
+    /// The result is identical to calling [`Self::insert`] for each entry in
+    /// order (a repeated key keeps its last value), but `insert` re-hashes
+    /// the whole key path every time, while this builds the structure first
+    /// and hashes every new or changed node once at the end. With the
+    /// `parallel` feature, large subtrees are hashed on all cores.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MerkleError::EmptyLeafData`] if any value is empty, without
+    /// changing the trie.
+    pub fn batch_insert<K, V>(&mut self, entries: &[(K, V)]) -> Result<(), MerkleError>
+    where
+        K: AsRef<[u8]>,
+        V: AsRef<[u8]>,
+    {
+        if entries.iter().any(|(_, value)| value.as_ref().is_empty()) {
+            return Err(MerkleError::EmptyLeafData);
+        }
+
+        for (key, value) in entries {
+            let key = key.as_ref();
+            if self.get(key).is_none() {
+                self.len += 1;
+            }
+            let path = bytes_to_nibbles(key);
+            self.root = Some(Self::insert_at(
+                self.root.take(),
+                &path,
+                value.as_ref().to_vec(),
+            ));
+        }
         self.refresh_root_hash();
 
         Ok(())
@@ -609,6 +651,9 @@ impl<H: HashFunction> MerklePatriciaTrie<H> {
     }
 
     fn refresh_root_hash(&mut self) {
+        if let Some(root) = self.root.as_deref_mut() {
+            Self::rehash(root);
+        }
         self.root_hash = self.root.as_ref().map(|root| match &root.reference {
             NodeRef::Hash(hash) => hash.clone(),
             // The root is always hashed, even when a parent would inline it.
@@ -616,8 +661,9 @@ impl<H: HashFunction> MerklePatriciaTrie<H> {
         });
     }
 
+    /// Wraps `kind` in a node with its subtree counts. The node is not hashed
+    /// yet: [`Self::rehash`] computes its reference before the root is read.
     fn make(kind: TrieNodeKind<H::Digest>) -> Box<TrieNode<H::Digest>> {
-        let reference = hash_node::<H>(&kind.to_mpt());
         let (node_count, height) = match &kind {
             TrieNodeKind::Leaf { .. } => (1, 1),
             TrieNodeKind::Extension { child, .. } => (1 + child.node_count, 1 + child.height),
@@ -631,10 +677,61 @@ impl<H: HashFunction> MerklePatriciaTrie<H> {
 
         Box::new(TrieNode {
             kind,
-            reference,
+            reference: NodeRef::Inline(Vec::new()),
             node_count,
             height,
+            hashed: false,
         })
+    }
+
+    /// Computes the reference of every unhashed node below and including
+    /// `node`, children first. Hashed subtrees are skipped, so after a single
+    /// insert or removal only the nodes on that key's path are hashed.
+    fn rehash(node: &mut TrieNode<H::Digest>) {
+        if node.hashed {
+            return;
+        }
+        match &mut node.kind {
+            TrieNodeKind::Leaf { .. } => {}
+            TrieNodeKind::Extension { child, .. } => Self::rehash(child),
+            TrieNodeKind::Branch { children, .. } => Self::rehash_children(children),
+        }
+        node.reference = hash_node::<H>(&node.kind.to_mpt());
+        node.hashed = true;
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    fn rehash_children(children: &mut Children<H::Digest>) {
+        for child in children.iter_mut().flatten() {
+            Self::rehash(child);
+        }
+    }
+
+    /// Hashes the children of a branch, on separate threads when the
+    /// subtrees are large (as after [`Self::batch_insert`]).
+    #[cfg(feature = "parallel")]
+    fn rehash_children(children: &mut Children<H::Digest>) {
+        use rayon::prelude::*;
+
+        /// Below this many nodes in the branch, threads cost more than they save.
+        const MIN_PARALLEL_NODES: usize = 2048;
+
+        let unhashed: usize = children
+            .iter()
+            .flatten()
+            .filter(|child| !child.hashed)
+            .map(|child| child.node_count)
+            .sum();
+        if unhashed < MIN_PARALLEL_NODES {
+            for child in children.iter_mut().flatten() {
+                Self::rehash(child);
+            }
+            return;
+        }
+        children
+            .par_iter_mut()
+            .flatten()
+            .for_each(|child| Self::rehash(child));
     }
 
     fn leaf(path: Vec<u8>, value: Vec<u8>) -> Box<TrieNode<H::Digest>> {
@@ -1398,6 +1495,55 @@ mod tests {
         EMPTY_RLP, MerklePatriciaTrie, MptNode, MptProof, NibblePath, NodeRef, compute_root_hash,
         hash_mpt_bytes, hash_node, hp_decode, hp_encode, rlp_decode, rlp_encode,
     };
+
+    #[test]
+    fn batch_insert_matches_sequential_inserts() {
+        // 3000 entries give branches with more than 2048 nodes, which the
+        // `parallel` feature hashes on several threads. Keys repeat, so the
+        // last value must win, as with `insert`.
+        for n in [1_u32, 2, 17, 3000] {
+            let entries: Vec<(Vec<u8>, Vec<u8>)> = (0..n)
+                .map(|i| {
+                    let key = (i % (n / 2 + 1)).to_be_bytes().to_vec();
+                    (key, format!("value-{i}").into_bytes())
+                })
+                .collect();
+
+            let mut batch = MerklePatriciaTrie::<Keccak256>::new();
+            batch.batch_insert(&entries).unwrap();
+
+            let mut sequential = MerklePatriciaTrie::<Keccak256>::new();
+            for (key, value) in &entries {
+                sequential.insert(key, value).unwrap();
+            }
+
+            assert_eq!(batch.root(), sequential.root(), "root for {n} entries");
+            assert_eq!(batch.leaf_count(), sequential.leaf_count());
+            assert_eq!(batch.node_count(), sequential.node_count());
+            assert_eq!(batch.height(), sequential.height());
+            let key = &entries[entries.len() / 2].0;
+            assert_eq!(
+                batch.generate_proof(key).unwrap(),
+                sequential.generate_proof(key).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn batch_insert_rejects_empty_values_without_changing_the_trie() {
+        let mut trie = MerklePatriciaTrie::<Keccak256>::new();
+        trie.insert(b"kept", b"value").unwrap();
+        let root = trie.root().cloned();
+
+        let entries: [(&[u8], &[u8]); 2] = [(b"new", b"value"), (b"empty", b"")];
+        assert!(matches!(
+            trie.batch_insert(&entries),
+            Err(MerkleError::EmptyLeafData)
+        ));
+        assert_eq!(trie.root().cloned(), root);
+        assert_eq!(trie.leaf_count(), 1);
+        assert_eq!(trie.get(b"new"), None);
+    }
 
     #[test]
     fn new_trie_is_empty() {

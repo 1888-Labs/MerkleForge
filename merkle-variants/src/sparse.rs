@@ -22,8 +22,10 @@
 //! assert_eq!(tree.empty_hash_at(0), &Sha256::empty());
 //! ```
 
+use core::any::{Any, TypeId};
 use core::fmt;
 use std::collections::{BTreeMap, HashMap, btree_map};
+use std::sync::{OnceLock, PoisonError, RwLock};
 
 use merkle_core::{
     error::MerkleError,
@@ -40,6 +42,41 @@ pub const EMPTY_HASH_LEVELS: usize = SPARSE_TREE_DEPTH + 1;
 
 /// Maximum subtree depth stored as a single batch entry.
 pub const BATCH_DEPTH: usize = 4;
+
+/// The empty-subtree digests for `H`, levels `0..=256`, computed once per
+/// hash type for the life of the process.
+///
+/// Level `0` is [`HashFunction::empty`] and level `n + 1` is
+/// `hash_nodes(level n, level n)`. Trees and stateless verification share
+/// this table, so neither pays the 256 hashes again.
+fn shared_empty_hashes<H: HashFunction>() -> &'static [H::Digest] {
+    type Cache = RwLock<HashMap<TypeId, &'static (dyn Any + Send + Sync)>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+
+    let cache = CACHE.get_or_init(Cache::default);
+    let id = TypeId::of::<H>();
+    let found = cache
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&id)
+        .copied();
+    let table = found.unwrap_or_else(|| {
+        let mut cache = cache.write().unwrap_or_else(PoisonError::into_inner);
+        *cache.entry(id).or_insert_with(|| {
+            let mut levels = Vec::with_capacity(EMPTY_HASH_LEVELS);
+            levels.push(H::empty());
+            for level in 1..EMPTY_HASH_LEVELS {
+                let previous = &levels[level - 1];
+                levels.push(H::hash_nodes(previous, previous));
+            }
+            // One small table per hash type, kept for the process lifetime.
+            Box::leak(Box::new(levels))
+        })
+    });
+    table
+        .downcast_ref::<Vec<H::Digest>>()
+        .expect("the cache entry for a TypeId always holds that type's table")
+}
 
 /// A serialized sparse subtree stored as one materialized entry.
 ///
@@ -215,13 +252,7 @@ impl<H: HashFunction> SparseMerkleTree<H> {
     /// [`HashFunction::hash_nodes`] over the previous empty hash.
     #[must_use]
     pub fn new() -> Self {
-        let mut empty_hashes = Vec::with_capacity(EMPTY_HASH_LEVELS);
-        empty_hashes.push(H::empty());
-
-        for level in 1..=SPARSE_TREE_DEPTH {
-            let previous = &empty_hashes[level - 1];
-            empty_hashes.push(H::hash_nodes(previous, previous));
-        }
+        let empty_hashes = shared_empty_hashes::<H>().to_vec();
         let root = empty_hashes[SPARSE_TREE_DEPTH].clone();
 
         Self {
@@ -633,6 +664,12 @@ impl<H: HashFunction> SparseMerkleTree<H> {
         }
 
         let was_internal = matches!(self.nodes.get(&node_key), Some(NodeEntry::Internal(_)));
+        if !was_internal {
+            // Nothing is stored below a node that is not internal (it was
+            // empty or a one-leaf shortcut), so build the subtree from scratch.
+            let leaves = self.leaves_under(node_key);
+            return Some(self.build_compressed_subtree(depth, &leaves));
+        }
         // Keys share this node's prefix and are sorted, so every key going
         // left precedes every key going right.
         let split = changed.partition_point(|key| !bit_at(key, depth));
@@ -697,76 +734,119 @@ impl<H: HashFunction> SparseMerkleTree<H> {
             .collect()
     }
 
+    /// Builds the canonical stored nodes for `leaves` (sorted, sharing the
+    /// prefix of length `depth`), stores them, and returns the subtree root.
     fn build_compressed_subtree(
         &mut self,
         depth: usize,
         leaves: &[([u8; 32], H::Digest)],
     ) -> H::Digest {
+        let mut built = Vec::new();
+        let root = Self::build_fresh(depth, leaves, &self.empty_hashes, &mut built);
+        self.last_node_accesses += built.len();
+        self.nodes.extend(built);
+        root
+    }
+
+    /// Pure form of [`Self::build_compressed_subtree`]: pushes the stored
+    /// nodes for `leaves` onto `out` instead of writing them to the tree, so
+    /// independent subtrees can be built on different threads.
+    fn build_fresh(
+        depth: usize,
+        leaves: &[([u8; 32], H::Digest)],
+        empty_hashes: &[H::Digest],
+        out: &mut Vec<(NodeKey, NodeEntry<H::Digest>)>,
+    ) -> H::Digest {
         debug_assert!(!leaves.is_empty());
 
-        if self.depth - depth <= BATCH_DEPTH {
-            let batch = self.build_batch(depth, leaves);
+        if SPARSE_TREE_DEPTH - depth <= BATCH_DEPTH {
+            let batch = Self::batch_from_leaves(depth, leaves, empty_hashes);
             let root = batch.root.clone();
-            self.nodes
-                .insert(NodeKey::new(leaves[0].0, depth), NodeEntry::Batch(batch));
-            self.last_node_accesses += 1;
-
+            out.push((NodeKey::new(leaves[0].0, depth), NodeEntry::Batch(batch)));
             return root;
         }
 
-        if leaves.len() == 1 {
-            let (key, leaf_hash) = &leaves[0];
-            if depth == self.depth {
-                self.nodes
-                    .insert(NodeKey::leaf(*key), NodeEntry::Leaf(leaf_hash.clone()));
-                self.last_node_accesses += 1;
+        if let [(key, leaf_hash)] = leaves {
+            if depth == SPARSE_TREE_DEPTH {
+                out.push((NodeKey::leaf(*key), NodeEntry::Leaf(leaf_hash.clone())));
                 return leaf_hash.clone();
             }
 
             let shortcut_hash =
-                Self::single_leaf_subtree_root(key, leaf_hash.clone(), depth, &self.empty_hashes);
-            self.nodes.insert(
+                Self::single_leaf_subtree_root(key, leaf_hash.clone(), depth, empty_hashes);
+            out.push((
                 NodeKey::new(*key, depth),
                 NodeEntry::Shortcut {
                     prefix: u8::try_from(depth).expect("shortcut depth is less than 256"),
                     hash: shortcut_hash.clone(),
                 },
-            );
-            self.last_node_accesses += 1;
-
+            ));
             return shortcut_hash;
         }
 
-        let mut left = Vec::new();
-        let mut right = Vec::new();
-        for (key, hash) in leaves {
-            if bit_at(key, depth) {
-                right.push((*key, hash.clone()));
-            } else {
-                left.push((*key, hash.clone()));
-            }
-        }
-
+        // Leaves are sorted, so every key going left precedes every key going right.
+        let split = leaves.partition_point(|(key, _)| !bit_at(key, depth));
+        let (left, right) = leaves.split_at(split);
         let child_depth = depth + 1;
-        let left_hash = if left.is_empty() {
-            self.empty_hashes[self.depth - child_depth].clone()
-        } else {
-            self.build_compressed_subtree(child_depth, &left)
-        };
-        let right_hash = if right.is_empty() {
-            self.empty_hashes[self.depth - child_depth].clone()
-        } else {
-            self.build_compressed_subtree(child_depth, &right)
-        };
-        let node_hash = H::hash_nodes(&left_hash, &right_hash);
+        let empty_child = &empty_hashes[SPARSE_TREE_DEPTH - child_depth];
 
-        self.nodes.insert(
+        let (left_hash, right_hash) =
+            Self::build_children(child_depth, left, right, empty_hashes, out);
+        let node_hash = H::hash_nodes(
+            left_hash.as_ref().unwrap_or(empty_child),
+            right_hash.as_ref().unwrap_or(empty_child),
+        );
+
+        out.push((
             NodeKey::new(leaves[0].0, depth),
             NodeEntry::Internal(node_hash.clone()),
-        );
-        self.last_node_accesses += 1;
-
+        ));
         node_hash
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    fn build_children(
+        depth: usize,
+        left: &[([u8; 32], H::Digest)],
+        right: &[([u8; 32], H::Digest)],
+        empty_hashes: &[H::Digest],
+        out: &mut Vec<(NodeKey, NodeEntry<H::Digest>)>,
+    ) -> (Option<H::Digest>, Option<H::Digest>) {
+        let build = |leaves: &[([u8; 32], H::Digest)], out: &mut Vec<_>| {
+            (!leaves.is_empty()).then(|| Self::build_fresh(depth, leaves, empty_hashes, out))
+        };
+        let left_hash = build(left, out);
+        let right_hash = build(right, out);
+        (left_hash, right_hash)
+    }
+
+    /// Builds both children, on separate threads when both are large enough
+    /// to be worth it. Node storage is the same either way.
+    #[cfg(feature = "parallel")]
+    fn build_children(
+        depth: usize,
+        left: &[([u8; 32], H::Digest)],
+        right: &[([u8; 32], H::Digest)],
+        empty_hashes: &[H::Digest],
+        out: &mut Vec<(NodeKey, NodeEntry<H::Digest>)>,
+    ) -> (Option<H::Digest>, Option<H::Digest>) {
+        /// Below this many keys on each side, splitting costs more than it saves.
+        const MIN_PARALLEL_KEYS: usize = 64;
+
+        let build = |leaves: &[([u8; 32], H::Digest)], out: &mut Vec<_>| {
+            (!leaves.is_empty()).then(|| Self::build_fresh(depth, leaves, empty_hashes, out))
+        };
+        if left.len() < MIN_PARALLEL_KEYS || right.len() < MIN_PARALLEL_KEYS {
+            let left_hash = build(left, out);
+            let right_hash = build(right, out);
+            return (left_hash, right_hash);
+        }
+
+        let mut right_out = Vec::new();
+        let (left_hash, right_hash) =
+            rayon::join(|| build(left, out), || build(right, &mut right_out));
+        out.append(&mut right_out);
+        (left_hash, right_hash)
     }
 
     fn build_batch(
@@ -774,9 +854,17 @@ impl<H: HashFunction> SparseMerkleTree<H> {
         depth: usize,
         leaves: &[([u8; 32], H::Digest)],
     ) -> SubtreeBatch<H::Digest> {
-        debug_assert!(self.depth - depth <= BATCH_DEPTH);
+        Self::batch_from_leaves(depth, leaves, &self.empty_hashes)
+    }
 
-        let root = Self::subtree_root_from_leaves(depth, leaves, &self.empty_hashes)
+    fn batch_from_leaves(
+        depth: usize,
+        leaves: &[([u8; 32], H::Digest)],
+        empty_hashes: &[H::Digest],
+    ) -> SubtreeBatch<H::Digest> {
+        debug_assert!(SPARSE_TREE_DEPTH - depth <= BATCH_DEPTH);
+
+        let root = Self::subtree_root_from_leaves(depth, leaves, empty_hashes)
             .expect("batch requires at least one leaf");
         let nodes = leaves
             .iter()
@@ -917,17 +1005,10 @@ impl<H: HashFunction> SparseMerkleTree<H> {
         siblings: &[Option<H::Digest>],
     ) -> H::Digest {
         let mut current = leaf_hash;
-        let mut empty_hash = H::empty();
-        let mut empty_level = 0_usize;
+        let empty_hashes = shared_empty_hashes::<H>();
 
         for (level, sibling) in siblings.iter().enumerate() {
-            let sibling_hash = sibling.as_ref().unwrap_or_else(|| {
-                while empty_level < level {
-                    empty_hash = H::hash_nodes(&empty_hash, &empty_hash);
-                    empty_level += 1;
-                }
-                &empty_hash
-            });
+            let sibling_hash = sibling.as_ref().unwrap_or(&empty_hashes[level]);
             let key_depth = SPARSE_TREE_DEPTH - 1 - level;
 
             current = if bit_at(key, key_depth) {
@@ -1632,6 +1713,38 @@ mod tests {
         assert_eq!(batch.nodes.get(&0), Some(&Sha256::hash(b"alice")));
         assert_eq!(batch.nodes.get(&1), Some(&Sha256::hash(b"bob")));
         assert_ne!(batch.root, *tree.empty_hash_at(BATCH_DEPTH));
+    }
+
+    #[test]
+    fn batch_sequential_and_rebuilt_trees_store_identical_nodes() {
+        // 600 keys crosses the `parallel` feature's split threshold (64 per side).
+        for n in [1_u32, 2, 3, 100, 600] {
+            let updates: Vec<([u8; 32], Vec<u8>)> = (0..n)
+                .map(|i| (Sha256::hash(&i.to_be_bytes()), i.to_le_bytes().to_vec()))
+                .collect();
+
+            let mut batch = SparseMerkleTree::<Sha256>::new();
+            batch.batch_insert(&updates).unwrap();
+
+            let mut sequential = SparseMerkleTree::<Sha256>::new();
+            for (key, value) in &updates {
+                sequential.insert(*key, value).unwrap();
+            }
+
+            let mut rebuilt = SparseMerkleTree::<Sha256>::new();
+            rebuilt.leaves = batch.leaves.clone();
+            rebuilt.leaf_count = batch.leaf_count;
+            rebuilt.rebuild_shortcuts();
+
+            assert_eq!(batch.root(), sequential.root(), "root for {n} keys");
+            assert_eq!(batch.nodes, sequential.nodes, "stored nodes for {n} keys");
+            assert_eq!(batch.nodes, rebuilt.nodes, "rebuilt nodes for {n} keys");
+            let (key, _) = &updates[updates.len() / 2];
+            assert_eq!(
+                batch.generate_membership_proof(*key).unwrap(),
+                sequential.generate_membership_proof(*key).unwrap()
+            );
+        }
     }
 
     #[test]
