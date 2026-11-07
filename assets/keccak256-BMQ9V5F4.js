@@ -1,0 +1,1 @@
+import{C as e}from"./utils-CxjQxKnW.js";import{t}from"./hash-function-CqhxkW2R.js";import{t as n}from"./sha3-CbgxEUtu.js";var r=t({algorithmName:`Keccak-256`,digestSize:32,hash:t=>n(e(Uint8Array.of(0),t)),hashNodes:(t,r)=>n(e(Uint8Array.of(1),t,r)),hashEncodedNode:e=>n(e)});export{r as t};
