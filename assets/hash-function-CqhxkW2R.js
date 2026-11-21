@@ -1,0 +1,1 @@
+import{C as e}from"./utils-CxjQxKnW.js";function t(t){let{algorithmName:n,digestSize:r,hash:i}=t,a=t.hashNodes??((t,n)=>i(e(Uint8Array.of(1),t,n))),o=t.hashEncodedNode??i,s=t.empty?.()??i(new Uint8Array);return Object.freeze({algorithmName:n,digestSize:r,hash:i,hashNodes:a,hashEncodedNode:o,empty:()=>s.slice()})}export{t};

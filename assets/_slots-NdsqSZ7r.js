@@ -1,0 +1,1 @@
+import{n as e,t}from"./_slots-B2bR7l8B.js";var n={Footer:t,OutlineFooter:void 0,SidebarHeader:e};export{n as export_379ac53d9642};

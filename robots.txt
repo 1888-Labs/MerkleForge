@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://1888-labs.github.io/sitemap.xml
